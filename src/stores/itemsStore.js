@@ -88,11 +88,43 @@ export const useItemsStore = defineStore('items', {
       this._resort();
     },
 
+    /**
+     * Item bearbeiten. Erlaubte Patch-Felder: name, categoryId.
+     * usageCount/lastUsedAt werden hier NICHT geändert.
+     *
+     * Wirft, wenn der neue Name leer ist oder zu einem ANDEREN
+     * Item kollidiert (case-insensitiv).
+     */
     async update(itemId, patch) {
-      await db.items.update(itemId, patch);
-      const item = this.byId(itemId);
-      if (item) Object.assign(item, patch);
+      const target = this.byId(itemId);
+      if (!target) throw new Error('Item nicht gefunden.');
+
+      const safePatch = {};
+      if (patch.name !== undefined) {
+        const trimmed = patch.name.trim();
+        if (!trimmed) throw new Error('Item-Name darf nicht leer sein.');
+        const collision = this.items.find(
+          (i) =>
+            i.id !== itemId &&
+            i.name.toLowerCase() === trimmed.toLowerCase()
+        );
+        if (collision) {
+          throw new Error(
+            `Ein anderes Item hat bereits den Namen "${collision.name}".`
+          );
+        }
+        safePatch.name = trimmed;
+      }
+      if (patch.categoryId !== undefined) {
+        // null ist erlaubt (= "Ohne Kategorie")
+        safePatch.categoryId = patch.categoryId;
+      }
+      if (Object.keys(safePatch).length === 0) return target;
+
+      await db.items.update(itemId, safePatch);
+      Object.assign(target, safePatch);
       this._resort();
+      return target;
     },
 
     async remove(itemId) {

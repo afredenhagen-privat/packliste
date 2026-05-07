@@ -47,6 +47,13 @@
         @click="$emit('quantity-change', quantity + 1)"
       >+</button>
       <button
+        v-if="editable"
+        type="button"
+        class="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+        aria-label="Bearbeiten"
+        @click="$emit('edit')"
+      >✏️</button>
+      <button
         v-if="removable"
         type="button"
         class="rounded-md p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30"
@@ -67,9 +74,10 @@ defineProps({
   checkable: { type: Boolean, default: false },
   quantityEditable: { type: Boolean, default: true },
   removable: { type: Boolean, default: true },
+  editable: { type: Boolean, default: false },
   categoryName: { type: String, default: null },
   categoryColor: { type: String, default: '#64748b' }
 });
 
-defineEmits(['toggle', 'quantity-change', 'remove']);
+defineEmits(['toggle', 'quantity-change', 'remove', 'edit']);
 </script>

@@ -54,9 +54,11 @@
           :quantity="1"
           :checkable="false"
           :quantity-editable="false"
+          :editable="true"
           :removable="true"
           :category-name="categoriesStore.nameOf(item.categoryId, null)"
           :category-color="categoriesStore.colorOf(item.categoryId)"
+          @edit="openEdit(item)"
           @remove="confirmDelete(item)"
         />
         <div class="px-3 pb-2 text-xs text-slate-400">
@@ -65,6 +67,8 @@
         </div>
       </li>
     </ul>
+
+    <ItemEditSheet v-model="editOpen" :item="editingItem" />
   </div>
 </template>
 
@@ -73,12 +77,20 @@ import { computed, onMounted, ref } from 'vue';
 import { useItemsStore } from '../stores/itemsStore.js';
 import { useCategoriesStore } from '../stores/categoriesStore.js';
 import ItemRow from '../components/ItemRow.vue';
+import ItemEditSheet from '../components/ItemEditSheet.vue';
 
 const itemsStore = useItemsStore();
 const categoriesStore = useCategoriesStore();
 
 const query = ref('');
 const categoryFilter = ref(null);
+const editOpen = ref(false);
+const editingItem = ref(null);
+
+function openEdit(item) {
+  editingItem.value = item;
+  editOpen.value = true;
+}
 
 onMounted(async () => {
   if (!itemsStore.loaded) await itemsStore.load();

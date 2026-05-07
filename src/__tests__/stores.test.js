@@ -52,6 +52,59 @@ describe('itemsStore', () => {
     await items.findOrCreateByName('Reisepass', 4);
     expect(items.search('zah').map((i) => i.name)).toEqual(['Zahnbürste']);
   });
+
+  describe('update (Edit)', () => {
+    it('benennt Item um und behält usageCount', async () => {
+      const items = useItemsStore();
+      await items.load();
+      const a = await items.findOrCreateByName('Zahnbürsste', 1);
+      await items.incrementUsage(a.id);
+      await items.incrementUsage(a.id);
+      await items.update(a.id, { name: 'Zahnbürste' });
+      const updated = items.byId(a.id);
+      expect(updated.name).toBe('Zahnbürste');
+      expect(updated.usageCount).toBe(2); // unverändert
+    });
+
+    it('ändert die Kategorie', async () => {
+      const items = useItemsStore();
+      await items.load();
+      const a = await items.findOrCreateByName('X', 1);
+      await items.update(a.id, { categoryId: 2 });
+      expect(items.byId(a.id).categoryId).toBe(2);
+    });
+
+    it('lehnt Kollision mit anderem Item ab', async () => {
+      const items = useItemsStore();
+      await items.load();
+      const a = await items.findOrCreateByName('Zahnbürste', 1);
+      const b = await items.findOrCreateByName('Reisepass', 4);
+      await expect(
+        items.update(b.id, { name: 'zahnbürste' })
+      ).rejects.toThrow(/bereits den Namen/);
+      // unverändert
+      expect(items.byId(b.id).name).toBe('Reisepass');
+      expect(items.byId(a.id).name).toBe('Zahnbürste');
+    });
+
+    it('lehnt leeren Namen ab', async () => {
+      const items = useItemsStore();
+      await items.load();
+      const a = await items.findOrCreateByName('Z', 1);
+      await expect(
+        items.update(a.id, { name: '   ' })
+      ).rejects.toThrow(/leer/);
+    });
+
+    it('akzeptiert Umbenennen auf gleichen Namen mit anderer Schreibweise', async () => {
+      const items = useItemsStore();
+      await items.load();
+      const a = await items.findOrCreateByName('zahnbürste', 1);
+      // gleiches Item, neue Groß-/Kleinschreibung → erlaubt
+      await items.update(a.id, { name: 'Zahnbürste' });
+      expect(items.byId(a.id).name).toBe('Zahnbürste');
+    });
+  });
 });
 
 describe('categoriesStore', () => {
