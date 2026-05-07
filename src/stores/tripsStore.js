@@ -1,0 +1,149 @@
+import { defineStore } from 'pinia';
+import { db } from '../db/database.js';
+import { useItemsStore } from './itemsStore.js';
+import { useTemplatesStore } from './templatesStore.js';
+
+/**
+ * Trips-Store: konkrete Reisen + ihre Items.
+ *
+ * `state.trips` enthält die Reise-Stammdaten.
+ * `state.tripItems[tripId]` enthält die Items
+ * als Array `{ id, tripId, itemId, quantity, checked }`.
+ */
+export const useTripsStore = defineStore('trips', {
+  state: () => ({
+    trips: [],
+    tripItems: {},
+    loaded: false
+  }),
+
+  getters: {
+    byId: (state) => (id) => state.trips.find((t) => t.id === id),
+    itemsFor: (state) => (tripId) => state.tripItems[tripId] ?? [],
+    progressFor: (state) => (tripId) => {
+      const items = state.tripItems[tripId] ?? [];
+      const checked = items.filter((i) => i.checked).length;
+      return { checked, total: items.length };
+    }
+  },
+
+  actions: {
+    async load() {
+      this.trips = (await db.trips.toArray()).sort(
+        (a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? '')
+      );
+      const allItems = await db.trip_items.toArray();
+      this.tripItems = groupBy(allItems, 'tripId');
+      this.loaded = true;
+    },
+
+    /**
+     * Erzeugt eine Reise. Wenn templateId gegeben ist, werden alle
+     * Template-Items in trip_items kopiert (mit checked=false).
+     */
+    async create({ name, templateId = null }) {
+      const row = {
+        name: name.trim(),
+        templateId,
+        createdAt: new Date().toISOString()
+      };
+      const tripId = await db.trips.add(row);
+      const created = { id: tripId, ...row };
+      this.trips.unshift(created);
+      this.tripItems[tripId] = [];
+
+      if (templateId) {
+        const templatesStore = useTemplatesStore();
+        const itemsStore = useItemsStore();
+        const sourceItems = templatesStore.itemsFor(templateId);
+        for (const ti of sourceItems) {
+          const tripItem = {
+            tripId,
+            itemId: ti.itemId,
+            quantity: ti.quantity ?? 1,
+            checked: false
+          };
+          const id = await db.trip_items.add(tripItem);
+          this.tripItems[tripId].push({ id, ...tripItem });
+          // usageCount erhöhen, weil das Item erneut "gebraucht" wird
+          await itemsStore.incrementUsage(ti.itemId);
+        }
+      }
+      return created;
+    },
+
+    async rename(tripId, name) {
+      const trimmed = name.trim();
+      await db.trips.update(tripId, { name: trimmed });
+      const trip = this.byId(tripId);
+      if (trip) trip.name = trimmed;
+    },
+
+    async remove(tripId) {
+      await db.transaction('rw', db.trips, db.trip_items, async () => {
+        await db.trip_items.where('tripId').equals(tripId).delete();
+        await db.trips.delete(tripId);
+      });
+      this.trips = this.trips.filter((t) => t.id !== tripId);
+      delete this.tripItems[tripId];
+    },
+
+    async addItem(tripId, itemId, quantity = 1) {
+      const existing = (this.tripItems[tripId] ?? []).find(
+        (ti) => ti.itemId === itemId
+      );
+      if (existing) {
+        return this.updateItemQuantity(
+          tripId,
+          existing.id,
+          (existing.quantity ?? 1) + quantity
+        );
+      }
+      const row = { tripId, itemId, quantity, checked: false };
+      const id = await db.trip_items.add(row);
+      const ti = { id, ...row };
+      if (!this.tripItems[tripId]) this.tripItems[tripId] = [];
+      this.tripItems[tripId].push(ti);
+
+      const itemsStore = useItemsStore();
+      await itemsStore.incrementUsage(itemId);
+      return ti;
+    },
+
+    async updateItemQuantity(tripId, tripItemId, quantity) {
+      const q = Math.max(1, Number(quantity) || 1);
+      await db.trip_items.update(tripItemId, { quantity: q });
+      const ti = (this.tripItems[tripId] ?? []).find(
+        (x) => x.id === tripItemId
+      );
+      if (ti) ti.quantity = q;
+      return ti;
+    },
+
+    async toggleChecked(tripId, tripItemId) {
+      const ti = (this.tripItems[tripId] ?? []).find(
+        (x) => x.id === tripItemId
+      );
+      if (!ti) return;
+      const next = !ti.checked;
+      await db.trip_items.update(tripItemId, { checked: next });
+      ti.checked = next;
+    },
+
+    async removeItem(tripId, tripItemId) {
+      await db.trip_items.delete(tripItemId);
+      this.tripItems[tripId] = (this.tripItems[tripId] ?? []).filter(
+        (ti) => ti.id !== tripItemId
+      );
+    }
+  }
+});
+
+function groupBy(rows, key) {
+  return rows.reduce((acc, row) => {
+    const k = row[key];
+    if (!acc[k]) acc[k] = [];
+    acc[k].push(row);
+    return acc;
+  }, {});
+}
