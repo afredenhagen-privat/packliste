@@ -54,6 +54,7 @@ export const useTripsStore = defineStore('trips', {
       const trip = state.trips.find((t) => t.id === tripId);
       if (!trip || !trip.templateId) return null;
       const templatesStore = useTemplatesStore();
+      if (!templatesStore.byId(trip.templateId)) return null;
       const tplItems = templatesStore.itemsFor(trip.templateId);
       const tripItems = state.tripItems[tripId] ?? [];
       const tplItemIds = new Set(tplItems.map((ti) => ti.itemId));
@@ -234,6 +235,7 @@ export const useTripsStore = defineStore('trips', {
       const trip = this.byId(tripId);
       if (!trip || !trip.templateId) return;
       const templatesStore = useTemplatesStore();
+      if (!templatesStore.byId(trip.templateId)) return;
       for (const itemId of addItemIds) {
         await templatesStore.addItem(trip.templateId, itemId, 1);
       }

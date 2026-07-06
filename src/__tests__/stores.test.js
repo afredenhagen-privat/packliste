@@ -471,3 +471,48 @@ describe('trips: Vorlagenabgleich', () => {
     expect(ids).toContain(gemein.id);
   });
 });
+
+describe('trips: Vorlagenabgleich mit gelöschter Vorlage', () => {
+  it('templateDiffFor liefert null wenn die Quell-Vorlage gelöscht wurde', async () => {
+    const items = useItemsStore();
+    const templates = useTemplatesStore();
+    const trips = useTripsStore();
+    await items.load();
+    await templates.load();
+    await trips.load();
+
+    const a = await items.findOrCreateByName('X', 1);
+    const tpl = await templates.create('Weg');
+    await templates.addItem(tpl.id, a.id, 1);
+    const trip = await trips.create({ name: 'Reise', templateId: tpl.id });
+
+    await templates.remove(tpl.id); // Vorlage löschen, trip.templateId bleibt
+
+    expect(trips.templateDiffFor(trip.id)).toBeNull();
+  });
+
+  it('applyTemplateSync ist ein No-op wenn die Quell-Vorlage gelöscht wurde', async () => {
+    const items = useItemsStore();
+    const templates = useTemplatesStore();
+    const trips = useTripsStore();
+    await items.load();
+    await templates.load();
+    await trips.load();
+
+    const a = await items.findOrCreateByName('Y', 1);
+    const nurTrip = await items.findOrCreateByName('Z', 1);
+    const tpl = await templates.create('Weg2');
+    await templates.addItem(tpl.id, a.id, 1);
+    const trip = await trips.create({ name: 'Reise2', templateId: tpl.id });
+    await trips.addItem(trip.id, nurTrip.id, 1);
+
+    await templates.remove(tpl.id);
+
+    await trips.applyTemplateSync(trip.id, {
+      addItemIds: [nurTrip.id],
+      removeTemplateItemIds: []
+    });
+    // Keine Geister-Vorlagen-Items entstanden
+    expect(templates.itemsFor(tpl.id)).toHaveLength(0);
+  });
+});

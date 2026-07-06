@@ -19,7 +19,7 @@
             @click="saveTplOpen = true"
           >Als Vorlage</button>
           <button
-            v-if="trip?.templateId"
+            v-if="canReconcile"
             type="button"
             class="btn-secondary shrink-0"
             @click="syncOpen = true"
@@ -110,6 +110,10 @@ const syncOpen = ref(false);
 const editedName = ref('');
 
 const trip = computed(() => tripsStore.byId(props.id));
+
+const canReconcile = computed(
+  () => !!trip.value?.templateId && !!templatesStore.byId(trip.value.templateId)
+);
 
 const progress = computed(() => {
   if (!trip.value) return { checked: 0, total: 0 };
