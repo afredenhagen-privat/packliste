@@ -87,7 +87,9 @@ const isEmpty = computed(() => !diff.value.added.length && !diff.value.removed.l
 const addSelected = reactive({});
 const removeSelected = reactive({});
 
-// Checkboxen initial ALLE OFFEN (bewusste Entscheidung pro Feld).
+// Beim Öffnen: alle Checkboxen initial UNGECHECKT – der Nutzer entscheidet
+// bewusst pro Feld, was übernommen wird. immediate, damit das Seeding auch
+// bei einem frisch gemounteten Sheet greift (unabhängig vom Parent).
 watch(
   () => props.modelValue,
   (v) => {
@@ -97,7 +99,8 @@ watch(
       diff.value.added.forEach((a) => (addSelected[a.itemId] = false));
       diff.value.removed.forEach((r) => (removeSelected[r.templateItemId] = false));
     }
-  }
+  },
+  { immediate: true }
 );
 
 function nameOf(itemId) {
