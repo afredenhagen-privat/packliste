@@ -198,6 +198,16 @@ export const useTripsStore = defineStore('trips', {
       this.tripItems[tripId] = (this.tripItems[tripId] ?? []).filter(
         (ti) => ti.id !== tripItemId
       );
+    },
+
+    async createTemplateFromTrip(tripId, name) {
+      const templatesStore = useTemplatesStore();
+      const tpl = await templatesStore.create(name);
+      const sourceItems = this.itemsFor(tripId);
+      for (const ti of sourceItems) {
+        await templatesStore.addItem(tpl.id, ti.itemId, ti.quantity ?? 1);
+      }
+      return tpl;
     }
   }
 });

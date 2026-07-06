@@ -362,3 +362,43 @@ describe('trips: manuelles Archivieren', () => {
     expect(trip.keepActive).toBe(false);
   });
 });
+
+describe('trips: createTemplateFromTrip', () => {
+  it('erstellt Vorlage und kopiert Items + Mengen, ignoriert checked', async () => {
+    const items = useItemsStore();
+    const templates = useTemplatesStore();
+    const trips = useTripsStore();
+    await items.load();
+    await templates.load();
+    await trips.load();
+
+    const a = await items.findOrCreateByName('Zahnbürste', 1);
+    const b = await items.findOrCreateByName('Socken', 1);
+    const trip = await trips.create({ name: 'Rom' });
+    await trips.addItem(trip.id, a.id, 1);
+    await trips.addItem(trip.id, b.id, 3);
+    await trips.toggleChecked(trip.id, trips.itemsFor(trip.id)[0].id);
+
+    const tpl = await trips.createTemplateFromTrip(trip.id, 'Städtereise');
+    expect(templates.byId(tpl.id).name).toBe('Städtereise');
+    const tItems = templates.itemsFor(tpl.id);
+    expect(tItems).toHaveLength(2);
+    const socken = tItems.find((ti) => ti.itemId === b.id);
+    expect(socken.quantity).toBe(3);
+  });
+
+  it('funktioniert auch für eine Reise ohne Quell-Vorlage', async () => {
+    const items = useItemsStore();
+    const templates = useTemplatesStore();
+    const trips = useTripsStore();
+    await items.load();
+    await templates.load();
+    await trips.load();
+
+    const a = await items.findOrCreateByName('Ladegerät', 1);
+    const trip = await trips.create({ name: 'Leer' });
+    await trips.addItem(trip.id, a.id, 1);
+    const tpl = await trips.createTemplateFromTrip(trip.id, 'Neu');
+    expect(templates.itemsFor(tpl.id)).toHaveLength(1);
+  });
+});
