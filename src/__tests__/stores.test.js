@@ -402,3 +402,72 @@ describe('trips: createTemplateFromTrip', () => {
     expect(templates.itemsFor(tpl.id)).toHaveLength(1);
   });
 });
+
+describe('trips: Vorlagenabgleich', () => {
+  async function setup() {
+    const items = useItemsStore();
+    const templates = useTemplatesStore();
+    const trips = useTripsStore();
+    await items.load();
+    await templates.load();
+    await trips.load();
+
+    const gemein = await items.findOrCreateByName('Gemeinsam', 1);
+    const nurTrip = await items.findOrCreateByName('NurReise', 1);
+    const nurTpl = await items.findOrCreateByName('NurVorlage', 1);
+
+    const tpl = await templates.create('Basis');
+    await templates.addItem(tpl.id, gemein.id, 1);
+    await templates.addItem(tpl.id, nurTpl.id, 1);
+
+    const trip = await trips.create({ name: 'Abgleich', templateId: tpl.id });
+    // create hat gemein + nurTpl kopiert; nurTpl entfernen, nurTrip zufügen
+    const nurTplTripItem = trips
+      .itemsFor(trip.id)
+      .find((ti) => ti.itemId === nurTpl.id);
+    await trips.removeItem(trip.id, nurTplTripItem.id);
+    await trips.addItem(trip.id, nurTrip.id, 1);
+
+    return { items, templates, trips, tpl, trip, gemein, nurTrip, nurTpl };
+  }
+
+  it('templateDiffFor listet added und removed korrekt', async () => {
+    const { trips, trip, nurTrip, nurTpl } = await setup();
+    const diff = trips.templateDiffFor(trip.id);
+    expect(diff.added.map((a) => a.itemId)).toEqual([nurTrip.id]);
+    expect(diff.removed.map((r) => r.itemId)).toEqual([nurTpl.id]);
+    expect(diff.removed[0].templateItemId).toBeTruthy();
+  });
+
+  it('templateDiffFor liefert null ohne Quell-Vorlage', async () => {
+    const trips = useTripsStore();
+    await trips.load();
+    const trip = await trips.create({ name: 'Ohne' });
+    expect(trips.templateDiffFor(trip.id)).toBeNull();
+  });
+
+  it('applyTemplateSync übernimmt nur ausgewählte Änderungen', async () => {
+    const { templates, trips, tpl, trip, nurTrip, nurTpl, gemein } =
+      await setup();
+    const diff = trips.templateDiffFor(trip.id);
+    // Nur das Hinzufügen anwenden, das Entfernen NICHT
+    await trips.applyTemplateSync(trip.id, {
+      addItemIds: diff.added.map((a) => a.itemId),
+      removeTemplateItemIds: []
+    });
+    const ids = templates.itemsFor(tpl.id).map((ti) => ti.itemId).sort();
+    expect(ids).toEqual([gemein.id, nurTpl.id, nurTrip.id].sort());
+  });
+
+  it('applyTemplateSync entfernt ausgewählte Vorlagen-Items', async () => {
+    const { templates, trips, tpl, trip, nurTpl, gemein } = await setup();
+    const diff = trips.templateDiffFor(trip.id);
+    await trips.applyTemplateSync(trip.id, {
+      addItemIds: [],
+      removeTemplateItemIds: diff.removed.map((r) => r.templateItemId)
+    });
+    const ids = templates.itemsFor(tpl.id).map((ti) => ti.itemId);
+    expect(ids).not.toContain(nurTpl.id);
+    expect(ids).toContain(gemein.id);
+  });
+});

@@ -49,6 +49,22 @@ export const useTripsStore = defineStore('trips', {
       const items = state.tripItems[tripId] ?? [];
       const checked = items.filter((i) => i.checked).length;
       return { checked, total: items.length };
+    },
+    templateDiffFor: (state) => (tripId) => {
+      const trip = state.trips.find((t) => t.id === tripId);
+      if (!trip || !trip.templateId) return null;
+      const templatesStore = useTemplatesStore();
+      const tplItems = templatesStore.itemsFor(trip.templateId);
+      const tripItems = state.tripItems[tripId] ?? [];
+      const tplItemIds = new Set(tplItems.map((ti) => ti.itemId));
+      const tripItemIds = new Set(tripItems.map((ti) => ti.itemId));
+      const added = tripItems
+        .filter((ti) => !tplItemIds.has(ti.itemId))
+        .map((ti) => ({ itemId: ti.itemId }));
+      const removed = tplItems
+        .filter((ti) => !tripItemIds.has(ti.itemId))
+        .map((ti) => ({ itemId: ti.itemId, templateItemId: ti.id }));
+      return { templateId: trip.templateId, added, removed };
     }
   },
 
@@ -212,6 +228,18 @@ export const useTripsStore = defineStore('trips', {
         await templatesStore.addItem(tpl.id, ti.itemId, ti.quantity ?? 1);
       }
       return tpl;
+    },
+
+    async applyTemplateSync(tripId, { addItemIds = [], removeTemplateItemIds = [] }) {
+      const trip = this.byId(tripId);
+      if (!trip || !trip.templateId) return;
+      const templatesStore = useTemplatesStore();
+      for (const itemId of addItemIds) {
+        await templatesStore.addItem(trip.templateId, itemId, 1);
+      }
+      for (const templateItemId of removeTemplateItemIds) {
+        await templatesStore.removeItem(trip.templateId, templateItemId);
+      }
     }
   }
 });
