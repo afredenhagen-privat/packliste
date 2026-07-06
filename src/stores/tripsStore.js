@@ -3,6 +3,29 @@ import { db } from '../db/database.js';
 import { useItemsStore } from './itemsStore.js';
 import { useTemplatesStore } from './templatesStore.js';
 
+const ARCHIVE_AFTER_DAYS = 30;
+
+/** Referenzdatum einer Reise: Reisedatum, sonst Erstelldatum. */
+export function referenceDateOf(trip) {
+  return trip.travelDate ?? trip.createdAt ?? null;
+}
+
+/**
+ * Ob eine Reise automatisch archiviert werden soll.
+ * Archiviert nur wenn nicht bereits archiviert, nicht manuell aktiv gehalten,
+ * und das Referenzdatum älter als ARCHIVE_AFTER_DAYS ist (strikt älter).
+ */
+export function shouldAutoArchive(trip, now = new Date()) {
+  if (trip.archivedAt) return false;
+  if (trip.keepActive) return false;
+  const ref = referenceDateOf(trip);
+  if (!ref) return false;
+  const refMs = new Date(ref).getTime();
+  if (Number.isNaN(refMs)) return false;
+  const cutoff = now.getTime() - ARCHIVE_AFTER_DAYS * 24 * 60 * 60 * 1000;
+  return refMs < cutoff;
+}
+
 /**
  * Trips-Store: konkrete Reisen + ihre Items.
  *
@@ -19,6 +42,8 @@ export const useTripsStore = defineStore('trips', {
 
   getters: {
     byId: (state) => (id) => state.trips.find((t) => t.id === id),
+    activeTrips: (state) => state.trips.filter((t) => !t.archivedAt),
+    archivedTrips: (state) => state.trips.filter((t) => t.archivedAt),
     itemsFor: (state) => (tripId) => state.tripItems[tripId] ?? [],
     progressFor: (state) => (tripId) => {
       const items = state.tripItems[tripId] ?? [];
@@ -32,6 +57,18 @@ export const useTripsStore = defineStore('trips', {
       this.trips = (await db.trips.toArray()).sort(
         (a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? '')
       );
+      // Auto-Archiv: alte, nicht manuell aktiv gehaltene Reisen stempeln.
+      const now = new Date();
+      const toArchive = this.trips.filter((t) => shouldAutoArchive(t, now));
+      if (toArchive.length) {
+        const stamp = now.toISOString();
+        await db.transaction('rw', db.trips, async () => {
+          for (const t of toArchive) {
+            await db.trips.update(t.id, { archivedAt: stamp });
+          }
+        });
+        for (const t of toArchive) t.archivedAt = stamp;
+      }
       const allItems = await db.trip_items.toArray();
       this.tripItems = groupBy(allItems, 'tripId');
       this.loaded = true;

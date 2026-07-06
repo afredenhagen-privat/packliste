@@ -4,7 +4,11 @@ import { initDatabase, clearAllData } from '../db/database.js';
 import { useItemsStore, sortItems } from '../stores/itemsStore.js';
 import { useCategoriesStore } from '../stores/categoriesStore.js';
 import { useTemplatesStore } from '../stores/templatesStore.js';
-import { useTripsStore } from '../stores/tripsStore.js';
+import {
+  useTripsStore,
+  referenceDateOf,
+  shouldAutoArchive
+} from '../stores/tripsStore.js';
 
 beforeEach(async () => {
   setActivePinia(createPinia());
@@ -224,5 +228,80 @@ describe('trips: createTripFromTemplate', () => {
     await trips.toggleChecked(trip.id, trips.itemsFor(trip.id)[0].id);
 
     expect(trips.progressFor(trip.id)).toEqual({ checked: 1, total: 2 });
+  });
+});
+
+describe('archive: shouldAutoArchive (pure)', () => {
+  const now = new Date('2026-07-06T12:00:00.000Z');
+  const daysAgo = (n) =>
+    new Date(now.getTime() - n * 24 * 60 * 60 * 1000).toISOString();
+
+  it('nutzt travelDate als Referenz vor createdAt', () => {
+    const trip = { createdAt: daysAgo(60), travelDate: daysAgo(1) };
+    expect(referenceDateOf(trip)).toBe(trip.travelDate);
+    expect(shouldAutoArchive(trip, now)).toBe(false);
+  });
+
+  it('fällt auf createdAt zurück wenn travelDate leer', () => {
+    const trip = { createdAt: daysAgo(40), travelDate: null };
+    expect(referenceDateOf(trip)).toBe(trip.createdAt);
+    expect(shouldAutoArchive(trip, now)).toBe(true);
+  });
+
+  it('archiviert älter als 30 Tage, aber nicht genau 30 Tage', () => {
+    expect(shouldAutoArchive({ createdAt: daysAgo(31) }, now)).toBe(true);
+    expect(shouldAutoArchive({ createdAt: daysAgo(30) }, now)).toBe(false);
+    expect(shouldAutoArchive({ createdAt: daysAgo(5) }, now)).toBe(false);
+  });
+
+  it('archiviert nicht wenn bereits archiviert oder keepActive', () => {
+    expect(
+      shouldAutoArchive({ createdAt: daysAgo(99), archivedAt: daysAgo(1) }, now)
+    ).toBe(false);
+    expect(
+      shouldAutoArchive({ createdAt: daysAgo(99), keepActive: true }, now)
+    ).toBe(false);
+  });
+});
+
+describe('trips: Auto-Archiv beim load', () => {
+  const daysAgo = (n) =>
+    new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString();
+
+  it('archiviert eine alte Reise beim Laden und persistiert', async () => {
+    const { db } = await import('../db/database.js');
+    await db.trips.add({
+      name: 'Alt',
+      templateId: null,
+      travelDate: null,
+      archivedAt: null,
+      keepActive: false,
+      createdAt: daysAgo(40)
+    });
+    const trips = useTripsStore();
+    await trips.load();
+    expect(trips.archivedTrips).toHaveLength(1);
+    expect(trips.activeTrips).toHaveLength(0);
+    // Persistenz: frischer Store lädt denselben Zustand
+    const fresh = useTripsStore();
+    fresh.$reset();
+    await fresh.load();
+    expect(fresh.archivedTrips).toHaveLength(1);
+  });
+
+  it('lässt eine junge Reise aktiv', async () => {
+    const { db } = await import('../db/database.js');
+    await db.trips.add({
+      name: 'Neu',
+      templateId: null,
+      travelDate: null,
+      archivedAt: null,
+      keepActive: false,
+      createdAt: daysAgo(5)
+    });
+    const trips = useTripsStore();
+    await trips.load();
+    expect(trips.activeTrips).toHaveLength(1);
+    expect(trips.archivedTrips).toHaveLength(0);
   });
 });
