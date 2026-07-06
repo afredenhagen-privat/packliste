@@ -78,10 +78,13 @@ export const useTripsStore = defineStore('trips', {
      * Erzeugt eine Reise. Wenn templateId gegeben ist, werden alle
      * Template-Items in trip_items kopiert (mit checked=false).
      */
-    async create({ name, templateId = null }) {
+    async create({ name, templateId = null, travelDate = null }) {
       const row = {
         name: name.trim(),
         templateId,
+        travelDate: travelDate || null,
+        archivedAt: null,
+        keepActive: false,
         createdAt: new Date().toISOString()
       };
       const tripId = await db.trips.add(row);
@@ -114,6 +117,29 @@ export const useTripsStore = defineStore('trips', {
       await db.trips.update(tripId, { name: trimmed });
       const trip = this.byId(tripId);
       if (trip) trip.name = trimmed;
+    },
+
+    async archive(tripId) {
+      const stamp = new Date().toISOString();
+      await db.trips.update(tripId, { archivedAt: stamp });
+      const t = this.byId(tripId);
+      if (t) t.archivedAt = stamp;
+    },
+
+    async reactivate(tripId) {
+      await db.trips.update(tripId, { archivedAt: null, keepActive: true });
+      const t = this.byId(tripId);
+      if (t) {
+        t.archivedAt = null;
+        t.keepActive = true;
+      }
+    },
+
+    async setTravelDate(tripId, travelDate) {
+      const v = travelDate || null;
+      await db.trips.update(tripId, { travelDate: v });
+      const t = this.byId(tripId);
+      if (t) t.travelDate = v;
     },
 
     async remove(tripId) {

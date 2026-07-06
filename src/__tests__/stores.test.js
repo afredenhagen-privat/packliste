@@ -305,3 +305,60 @@ describe('trips: Auto-Archiv beim load', () => {
     expect(trips.archivedTrips).toHaveLength(0);
   });
 });
+
+describe('trips: manuelles Archivieren', () => {
+  const daysAgo = (n) =>
+    new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString();
+
+  it('archive setzt archivedAt, reactivate setzt keepActive und hält aktiv', async () => {
+    const items = useItemsStore();
+    const trips = useTripsStore();
+    await items.load();
+    await trips.load();
+    const trip = await trips.create({ name: 'Wien' });
+
+    await trips.archive(trip.id);
+    expect(trips.byId(trip.id).archivedAt).toBeTruthy();
+    expect(trips.archivedTrips).toHaveLength(1);
+
+    await trips.reactivate(trip.id);
+    expect(trips.byId(trip.id).archivedAt).toBeNull();
+    expect(trips.byId(trip.id).keepActive).toBe(true);
+    expect(trips.activeTrips).toHaveLength(1);
+  });
+
+  it('reaktivierte alte Reise wird beim erneuten load NICHT wieder archiviert', async () => {
+    const { db } = await import('../db/database.js');
+    await db.trips.add({
+      name: 'Alt-reaktiviert',
+      templateId: null,
+      travelDate: null,
+      archivedAt: null,
+      keepActive: true,
+      createdAt: daysAgo(90)
+    });
+    const trips = useTripsStore();
+    await trips.load();
+    expect(trips.activeTrips).toHaveLength(1);
+    expect(trips.archivedTrips).toHaveLength(0);
+  });
+
+  it('setTravelDate speichert und leert das Reisedatum', async () => {
+    const trips = useTripsStore();
+    await trips.load();
+    const trip = await trips.create({ name: 'X' });
+    await trips.setTravelDate(trip.id, '2026-05-01');
+    expect(trips.byId(trip.id).travelDate).toBe('2026-05-01');
+    await trips.setTravelDate(trip.id, '');
+    expect(trips.byId(trip.id).travelDate).toBeNull();
+  });
+
+  it('create übernimmt travelDate und initialisiert Archiv-Felder', async () => {
+    const trips = useTripsStore();
+    await trips.load();
+    const trip = await trips.create({ name: 'Y', travelDate: '2026-08-01' });
+    expect(trip.travelDate).toBe('2026-08-01');
+    expect(trip.archivedAt).toBeNull();
+    expect(trip.keepActive).toBe(false);
+  });
+});
