@@ -18,6 +18,12 @@
             class="btn-secondary shrink-0"
             @click="saveTplOpen = true"
           >Als Vorlage</button>
+          <button
+            v-if="trip?.templateId"
+            type="button"
+            class="btn-secondary shrink-0"
+            @click="syncOpen = true"
+          >Abgleich</button>
           <button type="button" class="btn-primary" @click="pickerOpen = true">+ Item</button>
         </div>
       </div>
@@ -69,6 +75,11 @@
       :default-name="trip?.name ?? ''"
       @save="onSaveAsTemplate"
     />
+    <TemplateSyncSheet
+      v-if="trip"
+      v-model="syncOpen"
+      :trip-id="trip.id"
+    />
   </div>
 </template>
 
@@ -82,6 +93,7 @@ import ItemRow from '../components/ItemRow.vue';
 import ItemPickerSheet from '../components/ItemPickerSheet.vue';
 import ProgressBar from '../components/ProgressBar.vue';
 import SaveAsTemplateSheet from '../components/SaveAsTemplateSheet.vue';
+import TemplateSyncSheet from '../components/TemplateSyncSheet.vue';
 
 const props = defineProps({
   id: { type: Number, required: true }
@@ -94,6 +106,7 @@ const categoriesStore = useCategoriesStore();
 
 const pickerOpen = ref(false);
 const saveTplOpen = ref(false);
+const syncOpen = ref(false);
 const editedName = ref('');
 
 const trip = computed(() => tripsStore.byId(props.id));
