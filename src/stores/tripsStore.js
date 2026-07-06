@@ -200,6 +200,10 @@ export const useTripsStore = defineStore('trips', {
       );
     },
 
+    /**
+     * Erstellt eine neue Vorlage aus einer Reise (kopiert Items + Mengen,
+     * ignoriert checked). Erhöht dabei den usageCount der kopierten Items.
+     */
     async createTemplateFromTrip(tripId, name) {
       const templatesStore = useTemplatesStore();
       const tpl = await templatesStore.create(name);
