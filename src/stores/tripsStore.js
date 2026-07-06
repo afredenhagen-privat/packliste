@@ -3,6 +3,29 @@ import { db } from '../db/database.js';
 import { useItemsStore } from './itemsStore.js';
 import { useTemplatesStore } from './templatesStore.js';
 
+const ARCHIVE_AFTER_DAYS = 30;
+
+/** Referenzdatum einer Reise: Reisedatum, sonst Erstelldatum. */
+export function referenceDateOf(trip) {
+  return trip.travelDate ?? trip.createdAt ?? null;
+}
+
+/**
+ * Ob eine Reise automatisch archiviert werden soll.
+ * Archiviert nur wenn nicht bereits archiviert, nicht manuell aktiv gehalten,
+ * und das Referenzdatum älter als ARCHIVE_AFTER_DAYS ist (strikt älter).
+ */
+export function shouldAutoArchive(trip, now = new Date()) {
+  if (trip.archivedAt) return false;
+  if (trip.keepActive) return false;
+  const ref = referenceDateOf(trip);
+  if (!ref) return false;
+  const refMs = new Date(ref).getTime();
+  if (Number.isNaN(refMs)) return false;
+  const cutoff = now.getTime() - ARCHIVE_AFTER_DAYS * 24 * 60 * 60 * 1000;
+  return refMs < cutoff;
+}
+
 /**
  * Trips-Store: konkrete Reisen + ihre Items.
  *
@@ -19,11 +42,30 @@ export const useTripsStore = defineStore('trips', {
 
   getters: {
     byId: (state) => (id) => state.trips.find((t) => t.id === id),
+    activeTrips: (state) => state.trips.filter((t) => !t.archivedAt),
+    archivedTrips: (state) => state.trips.filter((t) => t.archivedAt),
     itemsFor: (state) => (tripId) => state.tripItems[tripId] ?? [],
     progressFor: (state) => (tripId) => {
       const items = state.tripItems[tripId] ?? [];
       const checked = items.filter((i) => i.checked).length;
       return { checked, total: items.length };
+    },
+    templateDiffFor: (state) => (tripId) => {
+      const trip = state.trips.find((t) => t.id === tripId);
+      if (!trip || !trip.templateId) return null;
+      const templatesStore = useTemplatesStore();
+      if (!templatesStore.byId(trip.templateId)) return null;
+      const tplItems = templatesStore.itemsFor(trip.templateId);
+      const tripItems = state.tripItems[tripId] ?? [];
+      const tplItemIds = new Set(tplItems.map((ti) => ti.itemId));
+      const tripItemIds = new Set(tripItems.map((ti) => ti.itemId));
+      const added = tripItems
+        .filter((ti) => !tplItemIds.has(ti.itemId))
+        .map((ti) => ({ itemId: ti.itemId }));
+      const removed = tplItems
+        .filter((ti) => !tripItemIds.has(ti.itemId))
+        .map((ti) => ({ itemId: ti.itemId, templateItemId: ti.id }));
+      return { templateId: trip.templateId, added, removed };
     }
   },
 
@@ -32,6 +74,18 @@ export const useTripsStore = defineStore('trips', {
       this.trips = (await db.trips.toArray()).sort(
         (a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? '')
       );
+      // Auto-Archiv: alte, nicht manuell aktiv gehaltene Reisen stempeln.
+      const now = new Date();
+      const toArchive = this.trips.filter((t) => shouldAutoArchive(t, now));
+      if (toArchive.length) {
+        const stamp = now.toISOString();
+        await db.transaction('rw', db.trips, async () => {
+          for (const t of toArchive) {
+            await db.trips.update(t.id, { archivedAt: stamp });
+          }
+        });
+        for (const t of toArchive) t.archivedAt = stamp;
+      }
       const allItems = await db.trip_items.toArray();
       this.tripItems = groupBy(allItems, 'tripId');
       this.loaded = true;
@@ -41,10 +95,13 @@ export const useTripsStore = defineStore('trips', {
      * Erzeugt eine Reise. Wenn templateId gegeben ist, werden alle
      * Template-Items in trip_items kopiert (mit checked=false).
      */
-    async create({ name, templateId = null }) {
+    async create({ name, templateId = null, travelDate = null }) {
       const row = {
         name: name.trim(),
         templateId,
+        travelDate: travelDate || null,
+        archivedAt: null,
+        keepActive: false,
         createdAt: new Date().toISOString()
       };
       const tripId = await db.trips.add(row);
@@ -77,6 +134,29 @@ export const useTripsStore = defineStore('trips', {
       await db.trips.update(tripId, { name: trimmed });
       const trip = this.byId(tripId);
       if (trip) trip.name = trimmed;
+    },
+
+    async archive(tripId) {
+      const stamp = new Date().toISOString();
+      await db.trips.update(tripId, { archivedAt: stamp });
+      const t = this.byId(tripId);
+      if (t) t.archivedAt = stamp;
+    },
+
+    async reactivate(tripId) {
+      await db.trips.update(tripId, { archivedAt: null, keepActive: true });
+      const t = this.byId(tripId);
+      if (t) {
+        t.archivedAt = null;
+        t.keepActive = true;
+      }
+    },
+
+    async setTravelDate(tripId, travelDate) {
+      const v = travelDate || null;
+      await db.trips.update(tripId, { travelDate: v });
+      const t = this.byId(tripId);
+      if (t) t.travelDate = v;
     },
 
     async remove(tripId) {
@@ -135,6 +215,33 @@ export const useTripsStore = defineStore('trips', {
       this.tripItems[tripId] = (this.tripItems[tripId] ?? []).filter(
         (ti) => ti.id !== tripItemId
       );
+    },
+
+    /**
+     * Erstellt eine neue Vorlage aus einer Reise (kopiert Items + Mengen,
+     * ignoriert checked). Erhöht dabei den usageCount der kopierten Items.
+     */
+    async createTemplateFromTrip(tripId, name) {
+      const templatesStore = useTemplatesStore();
+      const tpl = await templatesStore.create(name);
+      const sourceItems = this.itemsFor(tripId);
+      for (const ti of sourceItems) {
+        await templatesStore.addItem(tpl.id, ti.itemId, ti.quantity ?? 1);
+      }
+      return tpl;
+    },
+
+    async applyTemplateSync(tripId, { addItemIds = [], removeTemplateItemIds = [] }) {
+      const trip = this.byId(tripId);
+      if (!trip || !trip.templateId) return;
+      const templatesStore = useTemplatesStore();
+      if (!templatesStore.byId(trip.templateId)) return;
+      for (const itemId of addItemIds) {
+        await templatesStore.addItem(trip.templateId, itemId, 1);
+      }
+      for (const templateItemId of removeTemplateItemIds) {
+        await templatesStore.removeItem(trip.templateId, templateItemId);
+      }
     }
   }
 });

@@ -12,7 +12,20 @@
             @keydown.enter.prevent="saveName"
           />
         </div>
-        <button type="button" class="btn-primary" @click="pickerOpen = true">+ Item</button>
+        <div class="flex shrink-0 gap-2">
+          <button
+            type="button"
+            class="btn-secondary shrink-0"
+            @click="saveTplOpen = true"
+          >Als Vorlage</button>
+          <button
+            v-if="canReconcile"
+            type="button"
+            class="btn-secondary shrink-0"
+            @click="syncOpen = true"
+          >Abgleich</button>
+          <button type="button" class="btn-primary" @click="pickerOpen = true">+ Item</button>
+        </div>
       </div>
       <ProgressBar
         v-if="trip"
@@ -57,6 +70,16 @@
     </template>
 
     <ItemPickerSheet v-model="pickerOpen" @pick="onPick" />
+    <SaveAsTemplateSheet
+      v-model="saveTplOpen"
+      :default-name="trip?.name ?? ''"
+      @save="onSaveAsTemplate"
+    />
+    <TemplateSyncSheet
+      v-if="trip"
+      v-model="syncOpen"
+      :trip-id="trip.id"
+    />
   </div>
 </template>
 
@@ -69,6 +92,8 @@ import { useCategoriesStore } from '../stores/categoriesStore.js';
 import ItemRow from '../components/ItemRow.vue';
 import ItemPickerSheet from '../components/ItemPickerSheet.vue';
 import ProgressBar from '../components/ProgressBar.vue';
+import SaveAsTemplateSheet from '../components/SaveAsTemplateSheet.vue';
+import TemplateSyncSheet from '../components/TemplateSyncSheet.vue';
 
 const props = defineProps({
   id: { type: Number, required: true }
@@ -80,9 +105,15 @@ const itemsStore = useItemsStore();
 const categoriesStore = useCategoriesStore();
 
 const pickerOpen = ref(false);
+const saveTplOpen = ref(false);
+const syncOpen = ref(false);
 const editedName = ref('');
 
 const trip = computed(() => tripsStore.byId(props.id));
+
+const canReconcile = computed(
+  () => !!trip.value?.templateId && !!templatesStore.byId(trip.value.templateId)
+);
 
 const progress = computed(() => {
   if (!trip.value) return { checked: 0, total: 0 };
@@ -126,6 +157,12 @@ async function saveName() {
 async function onPick({ item, quantity }) {
   if (!trip.value) return;
   await tripsStore.addItem(trip.value.id, item.id, quantity);
+}
+
+async function onSaveAsTemplate(name) {
+  if (!trip.value) return;
+  await tripsStore.createTemplateFromTrip(trip.value.id, name);
+  window.alert(`Vorlage „${name}" gespeichert.`);
 }
 
 async function toggle(ti) {

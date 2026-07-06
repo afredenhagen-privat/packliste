@@ -4,7 +4,11 @@ import { initDatabase, clearAllData } from '../db/database.js';
 import { useItemsStore, sortItems } from '../stores/itemsStore.js';
 import { useCategoriesStore } from '../stores/categoriesStore.js';
 import { useTemplatesStore } from '../stores/templatesStore.js';
-import { useTripsStore } from '../stores/tripsStore.js';
+import {
+  useTripsStore,
+  referenceDateOf,
+  shouldAutoArchive
+} from '../stores/tripsStore.js';
 
 beforeEach(async () => {
   setActivePinia(createPinia());
@@ -224,5 +228,291 @@ describe('trips: createTripFromTemplate', () => {
     await trips.toggleChecked(trip.id, trips.itemsFor(trip.id)[0].id);
 
     expect(trips.progressFor(trip.id)).toEqual({ checked: 1, total: 2 });
+  });
+});
+
+describe('archive: shouldAutoArchive (pure)', () => {
+  const now = new Date('2026-07-06T12:00:00.000Z');
+  const daysAgo = (n) =>
+    new Date(now.getTime() - n * 24 * 60 * 60 * 1000).toISOString();
+
+  it('nutzt travelDate als Referenz vor createdAt', () => {
+    const trip = { createdAt: daysAgo(60), travelDate: daysAgo(1) };
+    expect(referenceDateOf(trip)).toBe(trip.travelDate);
+    expect(shouldAutoArchive(trip, now)).toBe(false);
+  });
+
+  it('fällt auf createdAt zurück wenn travelDate leer', () => {
+    const trip = { createdAt: daysAgo(40), travelDate: null };
+    expect(referenceDateOf(trip)).toBe(trip.createdAt);
+    expect(shouldAutoArchive(trip, now)).toBe(true);
+  });
+
+  it('archiviert älter als 30 Tage, aber nicht genau 30 Tage', () => {
+    expect(shouldAutoArchive({ createdAt: daysAgo(31) }, now)).toBe(true);
+    expect(shouldAutoArchive({ createdAt: daysAgo(30) }, now)).toBe(false);
+    expect(shouldAutoArchive({ createdAt: daysAgo(5) }, now)).toBe(false);
+  });
+
+  it('archiviert nicht wenn bereits archiviert oder keepActive', () => {
+    expect(
+      shouldAutoArchive({ createdAt: daysAgo(99), archivedAt: daysAgo(1) }, now)
+    ).toBe(false);
+    expect(
+      shouldAutoArchive({ createdAt: daysAgo(99), keepActive: true }, now)
+    ).toBe(false);
+  });
+});
+
+describe('trips: Auto-Archiv beim load', () => {
+  const daysAgo = (n) =>
+    new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString();
+
+  it('archiviert eine alte Reise beim Laden und persistiert', async () => {
+    const { db } = await import('../db/database.js');
+    await db.trips.add({
+      name: 'Alt',
+      templateId: null,
+      travelDate: null,
+      archivedAt: null,
+      keepActive: false,
+      createdAt: daysAgo(40)
+    });
+    const trips = useTripsStore();
+    await trips.load();
+    expect(trips.archivedTrips).toHaveLength(1);
+    expect(trips.activeTrips).toHaveLength(0);
+    // Persistenz: frischer Store lädt denselben Zustand
+    const fresh = useTripsStore();
+    fresh.$reset();
+    await fresh.load();
+    expect(fresh.archivedTrips).toHaveLength(1);
+  });
+
+  it('lässt eine junge Reise aktiv', async () => {
+    const { db } = await import('../db/database.js');
+    await db.trips.add({
+      name: 'Neu',
+      templateId: null,
+      travelDate: null,
+      archivedAt: null,
+      keepActive: false,
+      createdAt: daysAgo(5)
+    });
+    const trips = useTripsStore();
+    await trips.load();
+    expect(trips.activeTrips).toHaveLength(1);
+    expect(trips.archivedTrips).toHaveLength(0);
+  });
+});
+
+describe('trips: manuelles Archivieren', () => {
+  const daysAgo = (n) =>
+    new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString();
+
+  it('archive setzt archivedAt, reactivate setzt keepActive und hält aktiv', async () => {
+    const items = useItemsStore();
+    const trips = useTripsStore();
+    await items.load();
+    await trips.load();
+    const trip = await trips.create({ name: 'Wien' });
+
+    await trips.archive(trip.id);
+    expect(trips.byId(trip.id).archivedAt).toBeTruthy();
+    expect(trips.archivedTrips).toHaveLength(1);
+
+    await trips.reactivate(trip.id);
+    expect(trips.byId(trip.id).archivedAt).toBeNull();
+    expect(trips.byId(trip.id).keepActive).toBe(true);
+    expect(trips.activeTrips).toHaveLength(1);
+  });
+
+  it('reaktivierte alte Reise wird beim erneuten load NICHT wieder archiviert', async () => {
+    const { db } = await import('../db/database.js');
+    await db.trips.add({
+      name: 'Alt-reaktiviert',
+      templateId: null,
+      travelDate: null,
+      archivedAt: null,
+      keepActive: true,
+      createdAt: daysAgo(90)
+    });
+    const trips = useTripsStore();
+    await trips.load();
+    expect(trips.activeTrips).toHaveLength(1);
+    expect(trips.archivedTrips).toHaveLength(0);
+  });
+
+  it('setTravelDate speichert und leert das Reisedatum', async () => {
+    const trips = useTripsStore();
+    await trips.load();
+    const trip = await trips.create({ name: 'X' });
+    await trips.setTravelDate(trip.id, '2026-05-01');
+    expect(trips.byId(trip.id).travelDate).toBe('2026-05-01');
+    await trips.setTravelDate(trip.id, '');
+    expect(trips.byId(trip.id).travelDate).toBeNull();
+  });
+
+  it('create übernimmt travelDate und initialisiert Archiv-Felder', async () => {
+    const trips = useTripsStore();
+    await trips.load();
+    const trip = await trips.create({ name: 'Y', travelDate: '2026-08-01' });
+    expect(trip.travelDate).toBe('2026-08-01');
+    expect(trip.archivedAt).toBeNull();
+    expect(trip.keepActive).toBe(false);
+  });
+});
+
+describe('trips: createTemplateFromTrip', () => {
+  it('erstellt Vorlage und kopiert Items + Mengen, ignoriert checked', async () => {
+    const items = useItemsStore();
+    const templates = useTemplatesStore();
+    const trips = useTripsStore();
+    await items.load();
+    await templates.load();
+    await trips.load();
+
+    const a = await items.findOrCreateByName('Zahnbürste', 1);
+    const b = await items.findOrCreateByName('Socken', 1);
+    const trip = await trips.create({ name: 'Rom' });
+    await trips.addItem(trip.id, a.id, 1);
+    await trips.addItem(trip.id, b.id, 3);
+    await trips.toggleChecked(trip.id, trips.itemsFor(trip.id)[0].id);
+
+    const tpl = await trips.createTemplateFromTrip(trip.id, 'Städtereise');
+    expect(templates.byId(tpl.id).name).toBe('Städtereise');
+    const tItems = templates.itemsFor(tpl.id);
+    expect(tItems).toHaveLength(2);
+    const socken = tItems.find((ti) => ti.itemId === b.id);
+    expect(socken.quantity).toBe(3);
+  });
+
+  it('funktioniert auch für eine Reise ohne Quell-Vorlage', async () => {
+    const items = useItemsStore();
+    const templates = useTemplatesStore();
+    const trips = useTripsStore();
+    await items.load();
+    await templates.load();
+    await trips.load();
+
+    const a = await items.findOrCreateByName('Ladegerät', 1);
+    const trip = await trips.create({ name: 'Leer' });
+    await trips.addItem(trip.id, a.id, 1);
+    const tpl = await trips.createTemplateFromTrip(trip.id, 'Neu');
+    expect(templates.itemsFor(tpl.id)).toHaveLength(1);
+  });
+});
+
+describe('trips: Vorlagenabgleich', () => {
+  async function setup() {
+    const items = useItemsStore();
+    const templates = useTemplatesStore();
+    const trips = useTripsStore();
+    await items.load();
+    await templates.load();
+    await trips.load();
+
+    const gemein = await items.findOrCreateByName('Gemeinsam', 1);
+    const nurTrip = await items.findOrCreateByName('NurReise', 1);
+    const nurTpl = await items.findOrCreateByName('NurVorlage', 1);
+
+    const tpl = await templates.create('Basis');
+    await templates.addItem(tpl.id, gemein.id, 1);
+    await templates.addItem(tpl.id, nurTpl.id, 1);
+
+    const trip = await trips.create({ name: 'Abgleich', templateId: tpl.id });
+    // create hat gemein + nurTpl kopiert; nurTpl entfernen, nurTrip zufügen
+    const nurTplTripItem = trips
+      .itemsFor(trip.id)
+      .find((ti) => ti.itemId === nurTpl.id);
+    await trips.removeItem(trip.id, nurTplTripItem.id);
+    await trips.addItem(trip.id, nurTrip.id, 1);
+
+    return { items, templates, trips, tpl, trip, gemein, nurTrip, nurTpl };
+  }
+
+  it('templateDiffFor listet added und removed korrekt', async () => {
+    const { trips, trip, nurTrip, nurTpl } = await setup();
+    const diff = trips.templateDiffFor(trip.id);
+    expect(diff.added.map((a) => a.itemId)).toEqual([nurTrip.id]);
+    expect(diff.removed.map((r) => r.itemId)).toEqual([nurTpl.id]);
+    expect(diff.removed[0].templateItemId).toBeTruthy();
+  });
+
+  it('templateDiffFor liefert null ohne Quell-Vorlage', async () => {
+    const trips = useTripsStore();
+    await trips.load();
+    const trip = await trips.create({ name: 'Ohne' });
+    expect(trips.templateDiffFor(trip.id)).toBeNull();
+  });
+
+  it('applyTemplateSync übernimmt nur ausgewählte Änderungen', async () => {
+    const { templates, trips, tpl, trip, nurTrip, nurTpl, gemein } =
+      await setup();
+    const diff = trips.templateDiffFor(trip.id);
+    // Nur das Hinzufügen anwenden, das Entfernen NICHT
+    await trips.applyTemplateSync(trip.id, {
+      addItemIds: diff.added.map((a) => a.itemId),
+      removeTemplateItemIds: []
+    });
+    const ids = templates.itemsFor(tpl.id).map((ti) => ti.itemId).sort();
+    expect(ids).toEqual([gemein.id, nurTpl.id, nurTrip.id].sort());
+  });
+
+  it('applyTemplateSync entfernt ausgewählte Vorlagen-Items', async () => {
+    const { templates, trips, tpl, trip, nurTpl, gemein } = await setup();
+    const diff = trips.templateDiffFor(trip.id);
+    await trips.applyTemplateSync(trip.id, {
+      addItemIds: [],
+      removeTemplateItemIds: diff.removed.map((r) => r.templateItemId)
+    });
+    const ids = templates.itemsFor(tpl.id).map((ti) => ti.itemId);
+    expect(ids).not.toContain(nurTpl.id);
+    expect(ids).toContain(gemein.id);
+  });
+});
+
+describe('trips: Vorlagenabgleich mit gelöschter Vorlage', () => {
+  it('templateDiffFor liefert null wenn die Quell-Vorlage gelöscht wurde', async () => {
+    const items = useItemsStore();
+    const templates = useTemplatesStore();
+    const trips = useTripsStore();
+    await items.load();
+    await templates.load();
+    await trips.load();
+
+    const a = await items.findOrCreateByName('X', 1);
+    const tpl = await templates.create('Weg');
+    await templates.addItem(tpl.id, a.id, 1);
+    const trip = await trips.create({ name: 'Reise', templateId: tpl.id });
+
+    await templates.remove(tpl.id); // Vorlage löschen, trip.templateId bleibt
+
+    expect(trips.templateDiffFor(trip.id)).toBeNull();
+  });
+
+  it('applyTemplateSync ist ein No-op wenn die Quell-Vorlage gelöscht wurde', async () => {
+    const items = useItemsStore();
+    const templates = useTemplatesStore();
+    const trips = useTripsStore();
+    await items.load();
+    await templates.load();
+    await trips.load();
+
+    const a = await items.findOrCreateByName('Y', 1);
+    const nurTrip = await items.findOrCreateByName('Z', 1);
+    const tpl = await templates.create('Weg2');
+    await templates.addItem(tpl.id, a.id, 1);
+    const trip = await trips.create({ name: 'Reise2', templateId: tpl.id });
+    await trips.addItem(trip.id, nurTrip.id, 1);
+
+    await templates.remove(tpl.id);
+
+    await trips.applyTemplateSync(trip.id, {
+      addItemIds: [nurTrip.id],
+      removeTemplateItemIds: []
+    });
+    // Keine Geister-Vorlagen-Items entstanden
+    expect(templates.itemsFor(tpl.id)).toHaveLength(0);
   });
 });

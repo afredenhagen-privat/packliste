@@ -7,11 +7,18 @@
           Aktive Packlisten.
         </p>
       </div>
-      <button type="button" class="btn-primary" @click="newOpen = true">+ Neu</button>
+      <div class="flex items-center gap-2">
+        <button
+          type="button"
+          class="btn-secondary"
+          @click="showArchive = !showArchive"
+        >{{ showArchive ? 'Archiv aus' : 'Archiv' }}</button>
+        <button type="button" class="btn-primary" @click="newOpen = true">+ Neu</button>
+      </div>
     </header>
 
-    <ul v-if="tripsStore.trips.length" class="space-y-2">
-      <li v-for="t in tripsStore.trips" :key="t.id" class="card">
+    <ul v-if="tripsStore.activeTrips.length" class="space-y-2">
+      <li v-for="t in tripsStore.activeTrips" :key="t.id" class="card">
         <router-link :to="`/trips/${t.id}`" class="block space-y-2">
           <div class="flex items-center justify-between gap-3">
             <div class="min-w-0 flex-1">
@@ -23,6 +30,12 @@
                 </span>
               </div>
             </div>
+            <button
+              type="button"
+              class="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+              aria-label="Reise archivieren"
+              @click.prevent="tripsStore.archive(t.id)"
+            >📦</button>
             <button
               type="button"
               class="rounded-md p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30"
@@ -40,6 +53,30 @@
     <div v-else class="card text-center text-slate-500">
       Noch keine Reise. Lege deine erste an, optional aus einer Vorlage.
     </div>
+
+    <section v-if="showArchive" class="space-y-2">
+      <h2 class="px-1 pt-2 text-sm font-semibold text-slate-500">Archiv</h2>
+      <ul v-if="tripsStore.archivedTrips.length" class="space-y-2">
+        <li
+          v-for="t in tripsStore.archivedTrips"
+          :key="t.id"
+          class="card opacity-60"
+        >
+          <div class="flex items-center justify-between gap-3">
+            <router-link :to="`/trips/${t.id}`" class="min-w-0 flex-1">
+              <div class="font-semibold truncate">{{ t.name }}</div>
+              <div class="text-xs text-slate-500">{{ formatDate(referenceDateOf(t)) }}</div>
+            </router-link>
+            <button
+              type="button"
+              class="btn-secondary shrink-0"
+              @click.prevent="tripsStore.reactivate(t.id)"
+            >Reaktivieren</button>
+          </div>
+        </li>
+      </ul>
+      <div v-else class="card text-center text-sm text-slate-500">Archiv ist leer.</div>
+    </section>
 
     <!-- Neu -->
     <div
@@ -67,6 +104,10 @@
               >{{ t.name }}</option>
             </select>
           </label>
+          <label class="block">
+            <span class="mb-1 block text-xs font-medium text-slate-500">Reisedatum (optional)</span>
+            <input v-model="newTravelDate" type="date" class="input" />
+          </label>
           <div class="flex justify-end gap-2 pt-2">
             <button type="button" class="btn-secondary" @click="newOpen = false">Abbrechen</button>
             <button type="submit" class="btn-primary" :disabled="!newName.trim()">Anlegen</button>
@@ -80,7 +121,7 @@
 <script setup>
 import { nextTick, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { useTripsStore } from '../stores/tripsStore.js';
+import { useTripsStore, referenceDateOf } from '../stores/tripsStore.js';
 import { useTemplatesStore } from '../stores/templatesStore.js';
 import { useItemsStore } from '../stores/itemsStore.js';
 import { useCategoriesStore } from '../stores/categoriesStore.js';
@@ -95,12 +136,15 @@ const router = useRouter();
 const newOpen = ref(false);
 const newName = ref('');
 const newTemplateId = ref(null);
+const newTravelDate = ref('');
 const nameInput = ref(null);
+const showArchive = ref(false);
 
 watch(newOpen, async (v) => {
   if (v) {
     newName.value = '';
     newTemplateId.value = null;
+    newTravelDate.value = '';
     await nextTick();
     nameInput.value?.focus();
   }
@@ -118,7 +162,8 @@ async function create() {
   if (!trimmed) return;
   const trip = await tripsStore.create({
     name: trimmed,
-    templateId: newTemplateId.value
+    templateId: newTemplateId.value,
+    travelDate: newTravelDate.value || null
   });
   newOpen.value = false;
   router.push(`/trips/${trip.id}`);
