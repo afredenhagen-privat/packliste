@@ -23,7 +23,7 @@
           <div class="relative">
             <input
               ref="nameInput"
-              v-model="name"
+              :value="name"
               type="text"
               class="input"
               placeholder="z. B. Zahnbürste"
@@ -126,7 +126,14 @@ watch(
   }
 );
 
-function onInput() {
+function onInput(e) {
+  // Wert direkt aus dem Event übernehmen statt über v-model.
+  // Grund: v-model unterdrückt das Sync in `name` während einer
+  // IME-/Autokorrektur-Composition (mobile Tastaturen tippen im
+  // "composing"-Modus). Dadurch bliebe die Live-Filterung beim Tippen
+  // aus und würde erst bei compositionend (z. B. beim Löschen) greifen.
+  // Der native input-Event feuert auch während der Composition.
+  name.value = e.target.value;
   showSuggestions.value = true;
   selectedIndex.value = 0;
 }
