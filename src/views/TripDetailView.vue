@@ -32,6 +32,17 @@
         :checked="progress.checked"
         :total="progress.total"
       />
+      <label
+        v-if="trip && progress.checked > 0"
+        class="flex w-fit cursor-pointer items-center gap-2 text-sm text-slate-600 dark:text-slate-400"
+      >
+        <input
+          v-model="hidePacked"
+          type="checkbox"
+          class="h-4 w-4 rounded accent-accent-600"
+        />
+        Gepackte ausblenden ({{ progress.checked }})
+      </label>
     </header>
 
     <div v-if="!trip" class="card text-center text-slate-500">
@@ -39,21 +50,28 @@
     </div>
 
     <template v-else>
-      <div v-if="grouped.length === 0" class="card text-center text-slate-500">
+      <div v-if="progress.total === 0" class="card text-center text-slate-500">
         Noch keine Items. Tippe auf „+ Item".
       </div>
 
+      <div
+        v-else-if="displayGroups.length === 0"
+        class="card text-center text-slate-500"
+      >
+        Alles gepackt 🎉 — {{ progress.checked }} ausgeblendet
+      </div>
+
       <section
-        v-for="group in grouped"
+        v-for="group in displayGroups"
         :key="group.categoryId ?? 'none'"
         class="space-y-1"
       >
         <h3 class="px-1 text-sm font-semibold text-slate-500 dark:text-slate-400">
           {{ categoriesStore.nameOf(group.categoryId, 'Ohne Kategorie') }}
-          <span class="font-normal">({{ group.checkedCount }}/{{ group.items.length }})</span>
+          <span class="font-normal">({{ group.checkedCount }}/{{ group.total }})</span>
         </h3>
         <ul class="card divide-y divide-slate-100 dark:divide-slate-800 p-0">
-          <li v-for="ti in group.items" :key="ti.id">
+          <li v-for="ti in group.visibleItems" :key="ti.id">
             <ItemRow
               :item="ti.item"
               :quantity="ti.quantity ?? 1"
@@ -108,6 +126,9 @@ const pickerOpen = ref(false);
 const saveTplOpen = ref(false);
 const syncOpen = ref(false);
 const editedName = ref('');
+// Nur Anzeige-Filter, absichtlich NICHT persistiert: beim erneuten Öffnen
+// der Reise sind gepackte Items wieder sichtbar.
+const hidePacked = ref(false);
 
 const trip = computed(() => tripsStore.byId(props.id));
 
@@ -127,6 +148,21 @@ const grouped = computed(() => {
     .map((ti) => ({ ...ti, item: itemsStore.byId(ti.itemId) }))
     .filter((ti) => ti.item);
   return groupByCategory(enriched);
+});
+
+// Anzeige-Gruppen: bei aktivem Filter fallen gepackte Items raus, leere
+// Kategorien verschwinden. checkedCount/total bleiben die ECHTEN Zahlen,
+// damit die Kategorie-Kopfzeile den wahren Stand zeigt (nicht "0/0").
+const displayGroups = computed(() => {
+  return grouped.value
+    .map((g) => ({
+      ...g,
+      total: g.items.length,
+      visibleItems: hidePacked.value
+        ? g.items.filter((ti) => !ti.checked)
+        : g.items
+    }))
+    .filter((g) => g.visibleItems.length > 0);
 });
 
 watch(
