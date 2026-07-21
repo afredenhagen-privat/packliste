@@ -84,6 +84,25 @@
       </p>
     </section>
 
+    <!-- Vorlagen -->
+    <section class="card space-y-3">
+      <h2 class="text-lg font-semibold">Vorlagen</h2>
+      <p class="text-sm text-slate-500 dark:text-slate-400">
+        Eine geteilte Vorlage importieren. Items und Kategorien werden per Name in
+        deine Bibliothek eingefügt – nichts wird überschrieben.
+      </p>
+      <button type="button" class="btn-secondary" @click="$refs.templateInput.click()">
+        📥 Vorlage importieren
+      </button>
+      <input
+        ref="templateInput"
+        type="file"
+        accept="application/json,.json"
+        class="hidden"
+        @change="onTemplateFile"
+      />
+    </section>
+
     <!-- Info -->
     <section class="card space-y-1 text-sm text-slate-500 dark:text-slate-400">
       <p><strong>Packliste</strong> – PWA, lokale Datenhaltung im Browser.</p>
@@ -91,6 +110,12 @@
         Tipp: Auf dem Android-Gerät via Chrome → Menü → „Zum Startbildschirm hinzufügen", dann läuft die App im Vollbild und offline.
       </p>
     </section>
+
+    <TemplateImportSheet
+      v-model="importSheetOpen"
+      :analysis="importAnalysis"
+      @confirm="confirmTemplateImport"
+    />
   </div>
 </template>
 
@@ -100,16 +125,28 @@ import { useCategoriesStore } from '../stores/categoriesStore.js';
 import { useItemsStore } from '../stores/itemsStore.js';
 import { useTemplatesStore } from '../stores/templatesStore.js';
 import { useTripsStore } from '../stores/tripsStore.js';
+import { useRouter } from 'vue-router';
 import {
   exportBackup,
   importBackup,
   downloadBackup
 } from '../db/backup.js';
+import TemplateImportSheet from '../components/TemplateImportSheet.vue';
+import {
+  parseTemplateImport,
+  analyzeImport
+} from '../db/templateShare.js';
 
 const categoriesStore = useCategoriesStore();
 const itemsStore = useItemsStore();
 const templatesStore = useTemplatesStore();
 const tripsStore = useTripsStore();
+
+const router = useRouter();
+
+const importSheetOpen = ref(false);
+const importAnalysis = ref(null);
+const importParsed = ref(null);
 
 const newCatOpen = ref(false);
 const newCatName = ref('');
@@ -205,6 +242,50 @@ async function onImport(event) {
     setStatus('Backup importiert.');
   } catch (e) {
     setStatus(`Fehler beim Import: ${e.message}`, true);
+  }
+}
+
+async function onTemplateFile(event) {
+  const file = event.target.files?.[0];
+  event.target.value = ''; // reset, damit dieselbe Datei erneut wählbar ist
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const payload = JSON.parse(text);
+    const parsed = parseTemplateImport(payload);
+
+    // Stores sicherstellen (Settings lädt sonst nur categoriesStore)
+    if (!itemsStore.loaded) await itemsStore.load();
+    if (!templatesStore.loaded) await templatesStore.load();
+    if (!categoriesStore.loaded) await categoriesStore.load();
+
+    importParsed.value = parsed;
+    importAnalysis.value = analyzeImport(parsed, {
+      items: itemsStore.items,
+      categories: categoriesStore.categories,
+      templateNames: templatesStore.templates.map((t) => t.name)
+    });
+    importSheetOpen.value = true;
+  } catch (e) {
+    setStatus(`Import fehlgeschlagen: ${e.message}`, true);
+  }
+}
+
+async function confirmTemplateImport() {
+  try {
+    const tpl = await templatesStore.importShared(
+      importParsed.value,
+      importAnalysis.value.suggestedName
+    );
+    // Stores neu laden, damit neue Items/Kategorien überall sichtbar sind
+    await Promise.all([itemsStore.load(), categoriesStore.load()]);
+    importSheetOpen.value = false;
+    importParsed.value = null;
+    importAnalysis.value = null;
+    router.push({ name: 'template-detail', params: { id: tpl.id } });
+  } catch (e) {
+    setStatus(`Import fehlgeschlagen: ${e.message}`, true);
+    importSheetOpen.value = false;
   }
 }
 </script>
