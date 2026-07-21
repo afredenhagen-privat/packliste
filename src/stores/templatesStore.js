@@ -123,25 +123,28 @@ export const useTemplatesStore = defineStore('templates', {
       const tpl = await this.create(finalName);
 
       for (const it of parsed.items) {
-        // 1) Kategorie auflösen (nur wenn geteilt)
-        let categoryId = null;
-        if (it.category) {
-          const cat = await categoriesStore.create({
-            name: it.category.name,
-            color: it.category.color ?? undefined
-          });
-          categoryId = cat.id;
-        }
-
-        // 2) Item auflösen – vorhandenes NICHT umkategorisieren
+        // Vorhandenes Item wiederverwenden – Kategorie des Empfängers bleibt.
         const existing = itemsStore.items.find(
           (i) => i.name.toLowerCase() === it.name.toLowerCase()
         );
-        const item = existing
-          ? existing
-          : await itemsStore.findOrCreateByName(it.name, categoryId);
 
-        // 3) An die Vorlage hängen (addItem erhöht usageCount + merged Mengen)
+        let item;
+        if (existing) {
+          item = existing;
+        } else {
+          // Kategorie nur auflösen/anlegen, wenn wirklich ein neues Item sie braucht.
+          let categoryId = null;
+          if (it.category) {
+            const cat = await categoriesStore.create({
+              name: it.category.name,
+              color: it.category.color ?? undefined
+            });
+            categoryId = cat.id;
+          }
+          item = await itemsStore.findOrCreateByName(it.name, categoryId);
+        }
+
+        // An die Vorlage hängen (addItem erhöht usageCount + merged Mengen).
         await this.addItem(tpl.id, item.id, it.quantity);
       }
 

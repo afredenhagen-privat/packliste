@@ -231,6 +231,9 @@ describe('templatesStore.importShared', () => {
     expect(cats.categories.some((c) => c.name === 'Technik')).toBe(true);
     const laptop = items.items.find((i) => i.name === 'Laptop');
     expect(cats.byId(laptop.categoryId).name).toBe('Technik');
+
+    const socken = items.items.find((i) => i.name === 'Socken');
+    expect(socken.categoryId).toBeNull();
   });
 
   it('verwendet vorhandene Items wieder und lässt deren Kategorie unangetastet', async () => {
