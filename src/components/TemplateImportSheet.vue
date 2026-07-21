@@ -56,9 +56,9 @@
           <button
             type="button"
             class="btn-primary"
-            :disabled="!analysis"
+            :disabled="!analysis || busy"
             @click="confirm"
-          >Importieren</button>
+          >{{ busy ? 'Importiere…' : 'Importieren' }}</button>
         </div>
       </div>
     </div>
@@ -70,7 +70,8 @@ import { computed } from 'vue';
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
-  analysis: { type: Object, default: null }
+  analysis: { type: Object, default: null },
+  busy: { type: Boolean, default: false }
 });
 const emit = defineEmits(['update:modelValue', 'confirm']);
 

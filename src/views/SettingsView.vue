@@ -101,6 +101,9 @@
         class="hidden"
         @change="onTemplateFile"
       />
+      <p v-if="templateStatus" class="text-sm" :class="templateStatusError ? 'text-red-600' : 'text-emerald-600'">
+        {{ templateStatus }}
+      </p>
     </section>
 
     <!-- Info -->
@@ -114,6 +117,7 @@
     <TemplateImportSheet
       v-model="importSheetOpen"
       :analysis="importAnalysis"
+      :busy="importing"
       @confirm="confirmTemplateImport"
     />
   </div>
@@ -147,6 +151,9 @@ const router = useRouter();
 const importSheetOpen = ref(false);
 const importAnalysis = ref(null);
 const importParsed = ref(null);
+const importing = ref(false);
+const templateStatus = ref('');
+const templateStatusError = ref(false);
 
 const newCatOpen = ref(false);
 const newCatName = ref('');
@@ -249,6 +256,7 @@ async function onTemplateFile(event) {
   const file = event.target.files?.[0];
   event.target.value = ''; // reset, damit dieselbe Datei erneut wählbar ist
   if (!file) return;
+  templateStatus.value = '';
   try {
     const text = await file.text();
     const payload = JSON.parse(text);
@@ -267,11 +275,14 @@ async function onTemplateFile(event) {
     });
     importSheetOpen.value = true;
   } catch (e) {
-    setStatus(`Import fehlgeschlagen: ${e.message}`, true);
+    templateStatus.value = `Import fehlgeschlagen: ${e.message}`;
+    templateStatusError.value = true;
   }
 }
 
 async function confirmTemplateImport() {
+  if (importing.value) return;
+  importing.value = true;
   try {
     const tpl = await templatesStore.importShared(
       importParsed.value,
@@ -284,8 +295,11 @@ async function confirmTemplateImport() {
     importAnalysis.value = null;
     router.push({ name: 'template-detail', params: { id: tpl.id } });
   } catch (e) {
-    setStatus(`Import fehlgeschlagen: ${e.message}`, true);
+    templateStatus.value = `Import fehlgeschlagen: ${e.message}`;
+    templateStatusError.value = true;
     importSheetOpen.value = false;
+  } finally {
+    importing.value = false;
   }
 }
 </script>
