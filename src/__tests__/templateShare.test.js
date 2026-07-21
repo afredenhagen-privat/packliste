@@ -6,7 +6,11 @@ import { useCategoriesStore } from '../stores/categoriesStore.js';
 import { useTemplatesStore } from '../stores/templatesStore.js';
 import {
   buildTemplateExport,
-  parseTemplateImport
+  parseTemplateImport,
+  suggestTemplateName,
+  analyzeImport,
+  slugify,
+  buildTemplateFilename
 } from '../db/templateShare.js';
 
 beforeEach(async () => {
@@ -121,5 +125,72 @@ describe('parseTemplateImport', () => {
     expect(() =>
       parseTemplateImport({ ...valid, items: [{ name: '', quantity: 1 }] })
     ).toThrow(/Item 1 hat keinen Namen/);
+  });
+});
+
+describe('suggestTemplateName', () => {
+  it('lässt einen freien Namen unverändert', () => {
+    expect(suggestTemplateName('Reise', ['Urlaub'])).toBe('Reise');
+  });
+
+  it('hängt (2) bei Kollision an (case-insensitiv)', () => {
+    expect(suggestTemplateName('Reise', ['reise'])).toBe('Reise (2)');
+  });
+
+  it('zählt hoch bis ein freier Name gefunden ist', () => {
+    expect(suggestTemplateName('Reise', ['Reise', 'Reise (2)'])).toBe(
+      'Reise (3)'
+    );
+  });
+});
+
+describe('slugify / buildTemplateFilename', () => {
+  it('slugify ersetzt Umlaute und Sonderzeichen', () => {
+    expect(slugify('Geschäftsreise')).toBe('geschaeftsreise');
+    expect(slugify('Wochenende / Kurz!')).toBe('wochenende-kurz');
+  });
+
+  it('slugify fällt auf "vorlage" zurück wenn leer', () => {
+    expect(slugify('   ')).toBe('vorlage');
+  });
+
+  it('buildTemplateFilename baut den Dateinamen', () => {
+    expect(buildTemplateFilename('Geschäftsreise')).toBe(
+      'packliste-vorlage-geschaeftsreise.json'
+    );
+  });
+});
+
+describe('analyzeImport', () => {
+  const parsed = {
+    templateName: 'Reise',
+    items: [
+      { name: 'Laptop', quantity: 1, category: { name: 'Technik', color: '#3b82f6' } },
+      { name: 'Neu-Item', quantity: 2, category: { name: 'Neu-Cat', color: '#111111' } },
+      { name: 'Socken', quantity: 1, category: null }
+    ]
+  };
+
+  it('markiert vorhandene vs. neue Items und Kategorien und schlägt einen Namen vor', () => {
+    const analysis = analyzeImport(parsed, {
+      items: [{ name: 'Laptop' }, { name: 'Socken' }],
+      categories: [{ name: 'Technik' }],
+      templateNames: ['Reise']
+    });
+
+    expect(analysis.suggestedName).toBe('Reise (2)');
+
+    const laptop = analysis.items.find((i) => i.name === 'Laptop');
+    expect(laptop.itemExists).toBe(true);
+    expect(laptop.categoryExists).toBe(true);
+    expect(laptop.categoryName).toBe('Technik');
+
+    const neu = analysis.items.find((i) => i.name === 'Neu-Item');
+    expect(neu.itemExists).toBe(false);
+    expect(neu.categoryExists).toBe(false);
+
+    const socken = analysis.items.find((i) => i.name === 'Socken');
+    expect(socken.categoryName).toBeNull();
+    expect(socken.categoryExists).toBe(true);
   });
 });

@@ -97,3 +97,58 @@ export function parseTemplateImport(payload) {
 
   return { templateName: payload.template.name.trim(), items };
 }
+
+/**
+ * Liefert einen kollisionsfreien Vorlagennamen. Bei Kollision
+ * (case-insensitiv) wird " (2)", " (3)" … angehängt.
+ */
+export function suggestTemplateName(desiredName, existingNames) {
+  const taken = new Set((existingNames ?? []).map((n) => n.toLowerCase()));
+  if (!taken.has(desiredName.toLowerCase())) return desiredName;
+  let n = 2;
+  while (taken.has(`${desiredName} (${n})`.toLowerCase())) n++;
+  return `${desiredName} (${n})`;
+}
+
+/**
+ * Reine Analyse für die Import-Vorschau. Kein Schreiben.
+ * Markiert pro Item, ob Item/Kategorie beim Empfänger schon existieren,
+ * und liefert einen kollisionsfreien Vorlagennamen.
+ */
+export function analyzeImport(parsed, { items, categories, templateNames }) {
+  const itemNames = new Set((items ?? []).map((i) => i.name.toLowerCase()));
+  const catNames = new Set((categories ?? []).map((c) => c.name.toLowerCase()));
+
+  return {
+    suggestedName: suggestTemplateName(parsed.templateName, templateNames),
+    items: parsed.items.map((it) => ({
+      name: it.name,
+      quantity: it.quantity,
+      categoryName: it.category?.name ?? null,
+      categoryColor: it.category?.color ?? null,
+      itemExists: itemNames.has(it.name.toLowerCase()),
+      // Ohne Kategorie ist per Definition nichts "neu anzulegen".
+      categoryExists: it.category
+        ? catNames.has(it.category.name.toLowerCase())
+        : true
+    }))
+  };
+}
+
+/** Dateiname-tauglicher Slug (Umlaute ausgeschrieben). */
+export function slugify(name) {
+  const s = (name ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/ä/g, 'ae')
+    .replace(/ö/g, 'oe')
+    .replace(/ü/g, 'ue')
+    .replace(/ß/g, 'ss')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return s || 'vorlage';
+}
+
+export function buildTemplateFilename(name) {
+  return `packliste-vorlage-${slugify(name)}.json`;
+}
