@@ -27,6 +27,10 @@
                 :style="{ backgroundColor: group.color }"
               />
               {{ group.name }}
+              <span
+                v-if="group.isNewCategory"
+                class="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-normal text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+              >neue Kategorie</span>
             </h3>
             <ul class="card divide-y divide-slate-100 p-0 dark:divide-slate-800">
               <li
@@ -85,6 +89,8 @@ const grouped = computed(() => {
         key,
         name: it.categoryName ?? 'Ohne Kategorie',
         color: it.categoryColor,
+        // Kategorie ist neu, wenn sie einen Namen hat und beim Empfänger noch fehlt.
+        isNewCategory: it.categoryName != null && !it.categoryExists,
         items: []
       });
     }
