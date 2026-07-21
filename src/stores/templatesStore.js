@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { db } from '../db/database.js';
 import { useItemsStore } from './itemsStore.js';
+import { useCategoriesStore } from './categoriesStore.js';
 
 /**
  * Templates-Store: Vorlagen + ihre Items.
@@ -103,6 +104,48 @@ export const useTemplatesStore = defineStore('templates', {
       this.templateItems[templateId] = (
         this.templateItems[templateId] ?? []
       ).filter((ti) => ti.id !== templateItemId);
+    },
+
+    /**
+     * Importiert eine geteilte Vorlage (bereits via parseTemplateImport
+     * normalisiert) als NEUE Vorlage mit Namen `finalName`.
+     * Re-verlinkt Items/Kategorien per Name:
+     *   - Kategorie: vorhandene wiederverwenden, sonst neu anlegen.
+     *   - Item vorhanden (Name): wiederverwenden, Kategorie des Empfängers
+     *     bleibt unangetastet.
+     *   - Item fehlt: neu anlegen mit aufgelöster Kategorie.
+     * Setzt voraus, dass items-/categories-Store geladen sind.
+     */
+    async importShared(parsed, finalName) {
+      const itemsStore = useItemsStore();
+      const categoriesStore = useCategoriesStore();
+
+      const tpl = await this.create(finalName);
+
+      for (const it of parsed.items) {
+        // 1) Kategorie auflösen (nur wenn geteilt)
+        let categoryId = null;
+        if (it.category) {
+          const cat = await categoriesStore.create({
+            name: it.category.name,
+            color: it.category.color ?? undefined
+          });
+          categoryId = cat.id;
+        }
+
+        // 2) Item auflösen – vorhandenes NICHT umkategorisieren
+        const existing = itemsStore.items.find(
+          (i) => i.name.toLowerCase() === it.name.toLowerCase()
+        );
+        const item = existing
+          ? existing
+          : await itemsStore.findOrCreateByName(it.name, categoryId);
+
+        // 3) An die Vorlage hängen (addItem erhöht usageCount + merged Mengen)
+        await this.addItem(tpl.id, item.id, it.quantity);
+      }
+
+      return tpl;
     }
   }
 });

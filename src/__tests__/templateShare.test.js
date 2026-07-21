@@ -194,3 +194,62 @@ describe('analyzeImport', () => {
     expect(socken.categoryExists).toBe(true);
   });
 });
+
+import { parseTemplateImport as parse2 } from '../db/templateShare.js';
+
+describe('templatesStore.importShared', () => {
+  const payload = {
+    type: 'packliste-template',
+    version: 1,
+    template: { name: 'Geschäftsreise' },
+    items: [
+      { name: 'Laptop', quantity: 1, category: { name: 'Technik', color: '#3b82f6' } },
+      { name: 'Ladekabel', quantity: 2, category: { name: 'Technik', color: '#3b82f6' } },
+      { name: 'Socken', quantity: 1, category: null }
+    ]
+  };
+
+  it('legt eine neue Vorlage an und verlinkt Items/Kategorien per Name', async () => {
+    const items = useItemsStore();
+    const cats = useCategoriesStore();
+    const templates = useTemplatesStore();
+    await items.load();
+    await cats.load();
+    await templates.load();
+
+    const parsed = parse2(payload);
+    const tpl = await templates.importShared(parsed, 'Geschäftsreise');
+
+    expect(templates.byId(tpl.id).name).toBe('Geschäftsreise');
+    const tItems = templates.itemsFor(tpl.id);
+    expect(tItems).toHaveLength(3);
+    const kabel = tItems.find(
+      (ti) => items.byId(ti.itemId).name === 'Ladekabel'
+    );
+    expect(kabel.quantity).toBe(2);
+
+    expect(cats.categories.some((c) => c.name === 'Technik')).toBe(true);
+    const laptop = items.items.find((i) => i.name === 'Laptop');
+    expect(cats.byId(laptop.categoryId).name).toBe('Technik');
+  });
+
+  it('verwendet vorhandene Items wieder und lässt deren Kategorie unangetastet', async () => {
+    const items = useItemsStore();
+    const cats = useCategoriesStore();
+    const templates = useTemplatesStore();
+    await items.load();
+    await cats.load();
+    await templates.load();
+
+    const arbeit = await cats.create({ name: 'Arbeit', color: '#999999' });
+    const existingLaptop = await items.findOrCreateByName('Laptop', arbeit.id);
+
+    const parsed = parse2(payload);
+    const tpl = await templates.importShared(parsed, 'Geschäftsreise');
+
+    expect(items.items.filter((i) => i.name === 'Laptop')).toHaveLength(1);
+    expect(items.byId(existingLaptop.id).categoryId).toBe(arbeit.id);
+    const tItems = templates.itemsFor(tpl.id);
+    expect(tItems.some((ti) => ti.itemId === existingLaptop.id)).toBe(true);
+  });
+});
