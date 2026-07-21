@@ -152,3 +152,44 @@ export function slugify(name) {
 export function buildTemplateFilename(name) {
   return `packliste-vorlage-${slugify(name)}.json`;
 }
+
+/** Löst einen JSON-Datei-Download im Browser aus (Fallback). */
+function downloadJson(json, filename) {
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Teilt ein Export-Payload via Web Share API (als .json-Datei).
+ * Fällt auf Datei-Download zurück, wenn Sharing nicht verfügbar ist
+ * oder der Nutzer nicht abbricht. Liefert 'shared' | 'cancelled' | 'downloaded'.
+ */
+export async function shareTemplate(payload, filename) {
+  const json = JSON.stringify(payload, null, 2);
+  const file = new File([json], filename, { type: 'application/json' });
+
+  if (
+    typeof navigator !== 'undefined' &&
+    navigator.canShare &&
+    navigator.canShare({ files: [file] }) &&
+    navigator.share
+  ) {
+    try {
+      await navigator.share({ files: [file], title: payload.template.name });
+      return 'shared';
+    } catch (e) {
+      if (e && e.name === 'AbortError') return 'cancelled';
+      // sonst: auf Download zurückfallen
+    }
+  }
+
+  downloadJson(json, filename);
+  return 'downloaded';
+}
