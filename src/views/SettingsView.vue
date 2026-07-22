@@ -104,6 +104,23 @@
       <p v-if="templateStatus" class="text-sm" :class="templateStatusError ? 'text-red-600' : 'text-emerald-600'">
         {{ templateStatus }}
       </p>
+
+      <details class="text-sm">
+        <summary class="cursor-pointer text-slate-500 dark:text-slate-400">
+          Teilen funktioniert nicht?
+        </summary>
+        <div class="mt-2 space-y-2">
+          <p class="text-slate-500 dark:text-slate-400">
+            Was dieser Browser beim Teilen zulässt. Steht bei <strong>text</strong>
+            „nein“, ist Teilen auf dieser Seite generell nicht erlaubt – dann liegt
+            es nicht am Dateityp.
+          </p>
+          <pre class="overflow-x-auto rounded-md bg-slate-100 p-2 text-xs dark:bg-slate-800">{{ shareSupportText }}</pre>
+          <button type="button" class="btn-secondary" @click="copyShareSupport">
+            {{ copyLabel }}
+          </button>
+        </div>
+      </details>
     </section>
 
     <!-- Info -->
@@ -138,7 +155,8 @@ import {
 import TemplateImportSheet from '../components/TemplateImportSheet.vue';
 import {
   parseTemplateImport,
-  analyzeImport
+  analyzeImport,
+  formatShareSupport
 } from '../db/templateShare.js';
 
 const categoriesStore = useCategoriesStore();
@@ -154,6 +172,20 @@ const importParsed = ref(null);
 const importing = ref(false);
 const templateStatus = ref('');
 const templateStatusError = ref(false);
+const shareSupportText = ref('');
+const copyLabel = ref('Befund kopieren');
+
+async function copyShareSupport() {
+  try {
+    await navigator.clipboard.writeText(shareSupportText.value);
+    copyLabel.value = 'Kopiert';
+  } catch {
+    copyLabel.value = 'Kopieren nicht möglich – bitte markieren';
+  }
+  setTimeout(() => {
+    copyLabel.value = 'Befund kopieren';
+  }, 2500);
+}
 
 const newCatOpen = ref(false);
 const newCatName = ref('');
@@ -172,6 +204,7 @@ watch(newCatOpen, async (v) => {
 
 onMounted(async () => {
   if (!categoriesStore.loaded) await categoriesStore.load();
+  shareSupportText.value = formatShareSupport();
 });
 
 async function renameCategory(c) {
