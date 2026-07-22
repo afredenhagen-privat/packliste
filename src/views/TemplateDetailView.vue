@@ -179,31 +179,16 @@ async function onShare() {
   setShareStatus('');
   try {
     // Vorab gebautes Payload nutzen, damit die Nutzer-Geste nicht verfällt.
-    // War es nicht bereit, muss hier nachgeladen werden – dann KANN die Geste
-    // verfallen. Das wird im Fehlerfall mit ausgewiesen.
-    const vorabBereit = sharePayload.value != null;
     const payload =
       sharePayload.value ?? (await buildTemplateExport(template.value.id));
     const filename = buildTemplateFilename(template.value.name);
     const result = await shareTemplate(payload, filename);
 
     if (result.status === 'shared-file') {
-      setShareStatus('Vorlage als Datei geteilt.');
-    } else if (result.status === 'shared-text') {
-      setShareStatus(
-        'Vorlage als Text geteilt – der Empfänger fügt sie unter Einstellungen › Vorlagen ein.'
-      );
-    } else if (result.status === 'file-failed') {
-      // Die Geste ist verbraucht – der Nutzer muss einmal erneut tippen.
-      setShareStatus(
-        'Dateien kann dieses Gerät nicht teilen. Tippe noch einmal auf „Teilen“ – ab jetzt wird als Text geteilt.'
-      );
+      setShareStatus('Vorlage geteilt.');
     } else if (result.status === 'downloaded') {
-      // Grund mit anzeigen – ein stiller Fallback macht die Fehlersuche unmöglich.
       setShareStatus(
-        `Teilen abgelehnt, deshalb heruntergeladen. Grund: ${result.reason || 'unbekannt'}` +
-          ` (Daten vorab bereit: ${vorabBereit ? 'ja' : 'nein'})`,
-        true
+        `${filename} gespeichert – die Datei kannst du jetzt z. B. in WhatsApp anhängen.`
       );
     }
   } catch (e) {

@@ -252,21 +252,22 @@ export function buildShareCandidates(json, filename) {
 /**
  * Teilt ein Export-Payload über das native Teilen-Menü.
  *
- * ENTSCHEIDEND: Pro Nutzer-Geste ist nur EIN `navigator.share()`-Aufruf
- * möglich. Der erste Aufruf verbraucht die Geste; jeder weitere scheitert
- * zwangsläufig mit „Must be handling a user gesture". Es wird deshalb niemals
- * nacheinander probiert.
+ * Das Ergebnis ist IMMER eine Datei – entweder über das native Teilen-Menü
+ * oder als Download. Bewusst kein Text-Teilen: Geteilter Text lässt sich beim
+ * Empfänger nicht öffnen, nur mühsam kopieren.
  *
- * Stattdessen wird gemerkt, wenn Datei-Teilen auf diesem Gerät scheitert:
- * Manche Geräte melden `Permission denied`, obwohl `canShare` true liefert.
- * Ab dann geht es direkt den Text-Weg, der keiner Dateityp-Beschränkung
- * unterliegt. Kostet einmalig einen Fehlversuch, danach klappt es.
+ * Pro Nutzer-Geste ist nur EIN `navigator.share()`-Aufruf möglich – der erste
+ * verbraucht die Geste. Es wird deshalb nie nacheinander probiert; scheitert
+ * das native Menü, wird direkt heruntergeladen.
+ *
+ * Manche Geräte melden beim Datei-Teilen `Permission denied`, obwohl
+ * `canShare` true liefert. Das wird gemerkt, damit es beim nächsten Mal ohne
+ * Umweg zum Download geht.
  *
  * `payload` muss fertig vorliegen – nicht erst im Klick-Handler laden, sonst
  * verfällt die Geste.
  *
- * Liefert { status, reason? } mit status:
- *   'shared-file' | 'shared-text' | 'cancelled' | 'file-failed' | 'downloaded'
+ * Liefert { status } mit 'shared-file' | 'cancelled' | 'downloaded'.
  */
 const FILE_SHARE_BLOCKED_KEY = 'packliste:datei-teilen-blockiert';
 
@@ -303,13 +304,15 @@ export async function shareTemplate(payload, filename) {
   const json = JSON.stringify(payload, null, 2);
   const title = payload.template.name;
 
-  if (typeof navigator === 'undefined' || typeof navigator.share !== 'function') {
-    downloadJson(json, filename);
-    return { status: 'downloaded', reason: 'navigator.share fehlt' };
-  }
+  // Erst das native Menü mit der Datei versuchen – aber nur, solange dieses
+  // Gerät sie nicht schon abgelehnt hat. Scheitert es, wird das gemerkt und
+  // ab dann sofort heruntergeladen.
+  const nativeMoeglich =
+    typeof navigator !== 'undefined' &&
+    typeof navigator.share === 'function' &&
+    !fileShareBlocked();
 
-  // Weg A: Datei – nur solange dieses Gerät sie nicht schon abgelehnt hat.
-  if (!fileShareBlocked()) {
+  if (nativeMoeglich) {
     const file = pickShareableFile(json, filename);
     if (file) {
       try {
@@ -317,27 +320,15 @@ export async function shareTemplate(payload, filename) {
         return { status: 'shared-file' };
       } catch (e) {
         if (e && e.name === 'AbortError') return { status: 'cancelled' };
-        // Die Geste ist jetzt verbraucht – NICHT nachfassen, sondern merken.
         rememberFileShareBlocked();
-        return {
-          status: 'file-failed',
-          reason: `${e?.name ?? 'Fehler'} – ${e?.message ?? ''}`
-        };
+        // Kein zweiter share()-Versuch: Die Geste ist verbraucht, ein weiterer
+        // Aufruf scheitert garantiert. Stattdessen direkt die Datei liefern.
       }
+    } else {
+      rememberFileShareBlocked();
     }
-    rememberFileShareBlocked();
   }
 
-  // Weg B: Text – der einzige share()-Aufruf in diesem Gestenfenster.
-  try {
-    await navigator.share({ title, text: json });
-    return { status: 'shared-text' };
-  } catch (e) {
-    if (e && e.name === 'AbortError') return { status: 'cancelled' };
-    downloadJson(json, filename);
-    return {
-      status: 'downloaded',
-      reason: `text: ${e?.name ?? 'Fehler'} – ${e?.message ?? ''}`
-    };
-  }
+  downloadJson(json, filename);
+  return { status: 'downloaded' };
 }
