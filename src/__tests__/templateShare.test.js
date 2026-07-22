@@ -256,3 +256,24 @@ describe('templatesStore.importShared', () => {
     expect(tItems.some((ti) => ti.itemId === existingLaptop.id)).toBe(true);
   });
 });
+
+describe('buildShareCandidates', () => {
+  it('bietet .json zuerst und .txt als Fallback für Android-Chrome an', async () => {
+    const { buildShareCandidates } = await import('../db/templateShare.js');
+    const files = buildShareCandidates('{"a":1}', 'packliste-vorlage-reise.json');
+
+    expect(files).toHaveLength(2);
+    expect(files[0].name).toBe('packliste-vorlage-reise.json');
+    expect(files[0].type).toBe('application/json');
+    expect(files[1].name).toBe('packliste-vorlage-reise.txt');
+    expect(files[1].type).toBe('text/plain');
+  });
+
+  it('beide Kandidaten tragen denselben Inhalt', async () => {
+    const { buildShareCandidates } = await import('../db/templateShare.js');
+    const json = '{"type":"packliste-template"}';
+    const files = buildShareCandidates(json, 'x.json');
+    expect(await files[0].text()).toBe(json);
+    expect(await files[1].text()).toBe(json);
+  });
+});
