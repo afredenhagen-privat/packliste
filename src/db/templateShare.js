@@ -153,6 +153,53 @@ export function buildTemplateFilename(name) {
   return `packliste-vorlage-${slugify(name)}.json`;
 }
 
+/**
+ * Prüft, was der Browser beim Teilen tatsächlich zulässt.
+ *
+ * Zweck ist Fehlersuche: Wenn „Teilen" nur herunterlädt, sagt das Ergebnis,
+ * woran es liegt. `canShare` liefert laut Spezifikation für ALLES false,
+ * wenn die Seite die web-share-Berechtigung nicht nutzen darf – deshalb ist
+ * `canText` der Indikator: false bedeutet nicht „Dateityp abgelehnt", sondern
+ * „Teilen ist auf dieser Seite gar nicht erlaubt".
+ */
+export function describeShareSupport() {
+  const hasNavigator = typeof navigator !== 'undefined';
+  const hasShare = hasNavigator && typeof navigator.share === 'function';
+  const hasCanShare = hasNavigator && typeof navigator.canShare === 'function';
+
+  const probe = (data) => {
+    if (!hasCanShare) return null;
+    try {
+      return navigator.canShare(data);
+    } catch {
+      return false;
+    }
+  };
+
+  return {
+    secureContext: typeof window !== 'undefined' && window.isSecureContext,
+    hasShare,
+    hasCanShare,
+    canJson: probe({ files: [new File(['{}'], 't.json', { type: 'application/json' })] }),
+    canTxt: probe({ files: [new File(['{}'], 't.txt', { type: 'text/plain' })] }),
+    canText: probe({ text: 'test' })
+  };
+}
+
+/** Kurzfassung des Support-Befunds als kopierbarer Text. */
+export function formatShareSupport(s = describeShareSupport()) {
+  const ja = (v) => (v === null ? 'n/v' : v ? 'ja' : 'nein');
+  return [
+    `https: ${ja(s.secureContext)}`,
+    `share: ${ja(s.hasShare)}`,
+    `canShare: ${ja(s.hasCanShare)}`,
+    `.json: ${ja(s.canJson)}`,
+    `.txt: ${ja(s.canTxt)}`,
+    `text: ${ja(s.canText)}`,
+    `browser: ${typeof navigator !== 'undefined' ? navigator.userAgent : '—'}`
+  ].join('\n');
+}
+
 /** Löst einen JSON-Datei-Download im Browser aus (Fallback). */
 function downloadJson(json, filename) {
   const blob = new Blob([json], { type: 'application/json' });
