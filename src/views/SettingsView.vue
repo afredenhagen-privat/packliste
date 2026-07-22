@@ -97,7 +97,7 @@
       <input
         ref="templateInput"
         type="file"
-        accept="application/json,.json"
+        accept="application/json,.json,text/plain,.txt"
         class="hidden"
         @change="onTemplateFile"
       />

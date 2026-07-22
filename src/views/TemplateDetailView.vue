@@ -23,6 +23,12 @@
       </div>
     </header>
 
+    <p
+      v-if="shareStatus"
+      class="text-sm"
+      :class="shareStatusError ? 'text-red-600' : 'text-slate-500 dark:text-slate-400'"
+    >{{ shareStatus }}</p>
+
     <div v-if="!template" class="card text-center text-slate-500">
       Vorlage nicht gefunden.
     </div>
@@ -78,6 +84,8 @@ const categoriesStore = useCategoriesStore();
 
 const pickerOpen = ref(false);
 const editedName = ref('');
+const shareStatus = ref('');
+const shareStatusError = ref(false);
 
 const template = computed(() => templatesStore.byId(props.id));
 
@@ -128,14 +136,31 @@ async function removeItem(ti) {
   await templatesStore.removeItem(template.value.id, ti.id);
 }
 
+function setShareStatus(msg, isError = false) {
+  shareStatus.value = msg;
+  shareStatusError.value = isError;
+  setTimeout(() => {
+    if (shareStatus.value === msg) shareStatus.value = '';
+  }, 6000);
+}
+
 async function onShare() {
   if (!template.value) return;
+  setShareStatus('');
   try {
     const payload = await buildTemplateExport(template.value.id);
     const filename = buildTemplateFilename(template.value.name);
-    await shareTemplate(payload, filename);
+    const result = await shareTemplate(payload, filename);
+    if (result === 'downloaded') {
+      // Kein stiller Fallback – sonst wirkt es wie ein kaputter Teilen-Button.
+      setShareStatus(
+        'Dieser Browser kann keine Dateien ans Teilen-Menü geben – die Vorlage wurde stattdessen heruntergeladen.'
+      );
+    } else if (result === 'shared') {
+      setShareStatus('Vorlage geteilt.');
+    }
   } catch (e) {
-    window.alert(`Teilen fehlgeschlagen: ${e.message}`);
+    setShareStatus(`Teilen fehlgeschlagen: ${e.message}`, true);
   }
 }
 

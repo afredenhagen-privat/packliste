@@ -167,26 +167,47 @@ function downloadJson(json, filename) {
 }
 
 /**
- * Teilt ein Export-Payload via Web Share API (als .json-Datei).
- * Fällt auf Datei-Download zurück, wenn Sharing nicht verfügbar ist
- * oder der Nutzer nicht abbricht. Liefert 'shared' | 'cancelled' | 'downloaded'.
+ * Kandidaten-Dateien für den Share-Versuch, in Reihenfolge der Präferenz.
+ *
+ * Chrome auf Android lässt beim Datei-Teilen nur bestimmte Endungen/MIME-Typen
+ * zu (im Wesentlichen Audio, Bild, Text, Video) – `.json` wird dort abgelehnt,
+ * `canShare` liefert dann false. Deshalb als Zweitversuch dieselbe Nutzlast als
+ * `.txt`/`text/plain`. Für den Import ist die Endung egal: `parseTemplateImport`
+ * validiert über das `type`-Feld im Inhalt, nicht über den Dateinamen.
+ */
+export function buildShareCandidates(json, filename) {
+  const txtName = filename.replace(/\.json$/i, '.txt');
+  return [
+    new File([json], filename, { type: 'application/json' }),
+    new File([json], txtName, { type: 'text/plain' })
+  ];
+}
+
+/**
+ * Teilt ein Export-Payload via Web Share API. Probiert die Kandidaten aus
+ * `buildShareCandidates` der Reihe nach und nimmt den ersten, den der Browser
+ * akzeptiert. Fällt auf Datei-Download zurück, wenn Sharing nicht verfügbar ist
+ * oder alle Kandidaten abgelehnt werden.
+ *
+ * Liefert 'shared' | 'cancelled' | 'downloaded'.
  */
 export async function shareTemplate(payload, filename) {
   const json = JSON.stringify(payload, null, 2);
-  const file = new File([json], filename, { type: 'application/json' });
 
   if (
     typeof navigator !== 'undefined' &&
-    navigator.canShare &&
-    navigator.canShare({ files: [file] }) &&
-    navigator.share
+    typeof navigator.share === 'function' &&
+    typeof navigator.canShare === 'function'
   ) {
-    try {
-      await navigator.share({ files: [file], title: payload.template.name });
-      return 'shared';
-    } catch (e) {
-      if (e && e.name === 'AbortError') return 'cancelled';
-      // sonst: auf Download zurückfallen
+    for (const file of buildShareCandidates(json, filename)) {
+      if (!navigator.canShare({ files: [file] })) continue;
+      try {
+        await navigator.share({ files: [file], title: payload.template.name });
+        return 'shared';
+      } catch (e) {
+        if (e && e.name === 'AbortError') return 'cancelled';
+        break; // echter Fehler – nicht weiterprobieren, sondern herunterladen
+      }
     }
   }
 
