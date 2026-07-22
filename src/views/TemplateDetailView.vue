@@ -11,7 +11,16 @@
           @keydown.enter.prevent="saveName"
         />
       </div>
-      <button type="button" class="btn-primary" @click="pickerOpen = true">+ Item</button>
+      <div class="flex shrink-0 items-center gap-2">
+        <button
+          v-if="template"
+          type="button"
+          class="btn-secondary"
+          aria-label="Vorlage teilen"
+          @click="onShare"
+        >📤 Teilen</button>
+        <button type="button" class="btn-primary" @click="pickerOpen = true">+ Item</button>
+      </div>
     </header>
 
     <div v-if="!template" class="card text-center text-slate-500">
@@ -57,6 +66,7 @@ import { useItemsStore } from '../stores/itemsStore.js';
 import { useCategoriesStore } from '../stores/categoriesStore.js';
 import ItemRow from '../components/ItemRow.vue';
 import ItemPickerSheet from '../components/ItemPickerSheet.vue';
+import { buildTemplateExport, buildTemplateFilename, shareTemplate } from '../db/templateShare.js';
 
 const props = defineProps({
   id: { type: Number, required: true }
@@ -116,6 +126,17 @@ async function updateQuantity(ti, q) {
 
 async function removeItem(ti) {
   await templatesStore.removeItem(template.value.id, ti.id);
+}
+
+async function onShare() {
+  if (!template.value) return;
+  try {
+    const payload = await buildTemplateExport(template.value.id);
+    const filename = buildTemplateFilename(template.value.name);
+    await shareTemplate(payload, filename);
+  } catch (e) {
+    window.alert(`Teilen fehlgeschlagen: ${e.message}`);
+  }
 }
 
 function groupByCategory(rows) {
