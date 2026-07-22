@@ -113,6 +113,36 @@ onMounted(async () => {
   if (!categoriesStore.loaded) await categoriesStore.load();
 });
 
+/**
+ * Fertiges Export-Payload für den Teilen-Knopf.
+ *
+ * Wird VORAB gehalten, weil `navigator.share()` eine noch gültige Nutzer-Geste
+ * verlangt: Würden wir die Vorlage erst im Klick-Handler aus der Datenbank
+ * lesen, kann die Geste bis zum Aufruf verfallen – das native Menü ginge dann
+ * nicht auf. Neu gebaut wird es, sobald sich Name oder Items ändern.
+ */
+const sharePayload = ref(null);
+
+watch(
+  () => {
+    if (!template.value) return null;
+    const tis = templatesStore.itemsFor(template.value.id);
+    return `${template.value.name}|${tis.map((ti) => `${ti.itemId}:${ti.quantity}`).join(',')}`;
+  },
+  async (key) => {
+    if (!key) {
+      sharePayload.value = null;
+      return;
+    }
+    try {
+      sharePayload.value = await buildTemplateExport(template.value.id);
+    } catch {
+      sharePayload.value = null; // Klick fällt dann auf den Live-Aufbau zurück
+    }
+  },
+  { immediate: true }
+);
+
 async function saveName() {
   if (!template.value) return;
   const trimmed = editedName.value.trim();
@@ -148,16 +178,23 @@ async function onShare() {
   if (!template.value) return;
   setShareStatus('');
   try {
-    const payload = await buildTemplateExport(template.value.id);
+    // Vorab gebautes Payload nutzen, damit die Nutzer-Geste nicht verfällt.
+    const payload =
+      sharePayload.value ?? (await buildTemplateExport(template.value.id));
     const filename = buildTemplateFilename(template.value.name);
     const result = await shareTemplate(payload, filename);
-    if (result === 'downloaded') {
-      // Kein stiller Fallback – sonst wirkt es wie ein kaputter Teilen-Button.
+
+    if (result === 'shared-file') {
+      setShareStatus('Vorlage als Datei geteilt.');
+    } else if (result === 'shared-text') {
       setShareStatus(
-        'Dieser Browser kann keine Dateien ans Teilen-Menü geben – die Vorlage wurde stattdessen heruntergeladen.'
+        'Vorlage als Text geteilt – der Empfänger fügt sie unter Einstellungen › Vorlagen ein.'
       );
-    } else if (result === 'shared') {
-      setShareStatus('Vorlage geteilt.');
+    } else if (result === 'downloaded') {
+      // Kein stiller Fallback – sonst wirkt es wie ein kaputter Teilen-Knopf.
+      setShareStatus(
+        'Dieser Browser unterstützt das Teilen nicht – die Vorlage wurde stattdessen heruntergeladen.'
+      );
     }
   } catch (e) {
     setShareStatus(`Teilen fehlgeschlagen: ${e.message}`, true);

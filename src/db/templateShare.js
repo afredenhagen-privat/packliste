@@ -231,30 +231,55 @@ export function buildShareCandidates(json, filename) {
 }
 
 /**
- * Teilt ein Export-Payload via Web Share API. Probiert die Kandidaten aus
- * `buildShareCandidates` der Reihe nach und nimmt den ersten, den der Browser
- * akzeptiert. Fällt auf Datei-Download zurück, wenn Sharing nicht verfügbar ist
- * oder alle Kandidaten abgelehnt werden.
+ * Teilt ein Export-Payload über das native Teilen-Menü.
  *
- * Liefert 'shared' | 'cancelled' | 'downloaded'.
+ * Kaskade, weil Browser unterschiedlich viel zulassen:
+ *   1. Datei (.json, dann .txt) – schönster Weg, der Empfänger bekommt eine
+ *      Datei, die er direkt importieren kann. Chrome beschränkt Datei-Teilen
+ *      allerdings auf eine Allowlist von Endungen.
+ *   2. Reiner Text – unterliegt KEINER Dateityp-Beschränkung. Wo Web Share
+ *      überhaupt existiert, funktioniert dieser Weg. Der Empfänger fügt den
+ *      Text beim Import ein.
+ *   3. Download – letzter Ausweg (Desktop ohne Web Share).
+ *
+ * WICHTIG: `navigator.share()` verlangt eine noch gültige Nutzer-Geste. Deshalb
+ * muss `payload` beim Aufruf bereits fertig vorliegen – nicht erst im Klick-
+ * Handler asynchron geladen werden.
+ *
+ * Liefert 'shared-file' | 'shared-text' | 'cancelled' | 'downloaded'.
  */
 export async function shareTemplate(payload, filename) {
   const json = JSON.stringify(payload, null, 2);
+  const title = payload.template.name;
 
-  if (
-    typeof navigator !== 'undefined' &&
-    typeof navigator.share === 'function' &&
-    typeof navigator.canShare === 'function'
-  ) {
-    for (const file of buildShareCandidates(json, filename)) {
-      if (!navigator.canShare({ files: [file] })) continue;
+  if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+    const canShare = (data) => {
+      if (typeof navigator.canShare !== 'function') return false;
       try {
-        await navigator.share({ files: [file], title: payload.template.name });
-        return 'shared';
+        return navigator.canShare(data);
+      } catch {
+        return false;
+      }
+    };
+
+    for (const file of buildShareCandidates(json, filename)) {
+      if (!canShare({ files: [file] })) continue;
+      try {
+        await navigator.share({ files: [file], title });
+        return 'shared-file';
       } catch (e) {
         if (e && e.name === 'AbortError') return 'cancelled';
-        break; // echter Fehler – nicht weiterprobieren, sondern herunterladen
+        break; // Datei-Weg scheitert – auf Text ausweichen
       }
+    }
+
+    // Text-Weg: keine Allowlist, funktioniert wo Web Share erlaubt ist.
+    try {
+      await navigator.share({ title, text: json });
+      return 'shared-text';
+    } catch (e) {
+      if (e && e.name === 'AbortError') return 'cancelled';
+      // sonst: herunterladen
     }
   }
 

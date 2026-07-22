@@ -91,9 +91,14 @@
         Eine geteilte Vorlage importieren. Items und Kategorien werden per Name in
         deine Bibliothek eingefügt – nichts wird überschrieben.
       </p>
-      <button type="button" class="btn-secondary" @click="$refs.templateInput.click()">
-        📥 Vorlage importieren
-      </button>
+      <div class="flex flex-wrap gap-2">
+        <button type="button" class="btn-secondary" @click="$refs.templateInput.click()">
+          📥 Aus Datei
+        </button>
+        <button type="button" class="btn-secondary" @click="pasteOpen = !pasteOpen">
+          📋 Aus Text einfügen
+        </button>
+      </div>
       <input
         ref="templateInput"
         type="file"
@@ -101,6 +106,29 @@
         class="hidden"
         @change="onTemplateFile"
       />
+
+      <div v-if="pasteOpen" class="space-y-2">
+        <label class="block">
+          <span class="mb-1 block text-xs font-medium text-slate-500">
+            Geteilten Vorlagen-Text hier einfügen
+          </span>
+          <textarea
+            v-model="pasteText"
+            rows="4"
+            class="input font-mono text-xs"
+            placeholder='{ "type": "packliste-template", … }'
+          ></textarea>
+        </label>
+        <div class="flex justify-end gap-2">
+          <button type="button" class="btn-secondary" @click="cancelPaste">Abbrechen</button>
+          <button
+            type="button"
+            class="btn-primary"
+            :disabled="!pasteText.trim()"
+            @click="onTemplateText"
+          >Prüfen</button>
+        </div>
+      </div>
       <p v-if="templateStatus" class="text-sm" :class="templateStatusError ? 'text-red-600' : 'text-emerald-600'">
         {{ templateStatus }}
       </p>
@@ -174,6 +202,8 @@ const templateStatus = ref('');
 const templateStatusError = ref(false);
 const shareSupportText = ref('');
 const copyLabel = ref('Befund kopieren');
+const pasteOpen = ref(false);
+const pasteText = ref('');
 
 async function copyShareSupport() {
   try {
@@ -285,14 +315,15 @@ async function onImport(event) {
   }
 }
 
-async function onTemplateFile(event) {
-  const file = event.target.files?.[0];
-  event.target.value = ''; // reset, damit dieselbe Datei erneut wählbar ist
-  if (!file) return;
+/**
+ * Gemeinsamer Weg für Datei- und Text-Import: rohen Text prüfen und die
+ * Vorschau öffnen. Der Text-Weg ist nötig, weil das native Teilen-Menü auf
+ * manchen Geräten nur Text weitergeben darf, keine Dateien.
+ */
+async function openImportPreview(rawText) {
   templateStatus.value = '';
   try {
-    const text = await file.text();
-    const payload = JSON.parse(text);
+    const payload = JSON.parse(rawText);
     const parsed = parseTemplateImport(payload);
 
     // Stores sicherstellen (Settings lädt sonst nur categoriesStore)
@@ -307,10 +338,30 @@ async function onTemplateFile(event) {
       templateNames: templatesStore.templates.map((t) => t.name)
     });
     importSheetOpen.value = true;
+    return true;
   } catch (e) {
     templateStatus.value = `Import fehlgeschlagen: ${e.message}`;
     templateStatusError.value = true;
+    return false;
   }
+}
+
+async function onTemplateFile(event) {
+  const file = event.target.files?.[0];
+  event.target.value = ''; // reset, damit dieselbe Datei erneut wählbar ist
+  if (!file) return;
+  await openImportPreview(await file.text());
+}
+
+async function onTemplateText() {
+  const raw = pasteText.value.trim();
+  if (!raw) return;
+  if (await openImportPreview(raw)) cancelPaste();
+}
+
+function cancelPaste() {
+  pasteOpen.value = false;
+  pasteText.value = '';
 }
 
 async function confirmTemplateImport() {
