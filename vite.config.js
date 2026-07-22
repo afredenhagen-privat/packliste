@@ -36,6 +36,19 @@ export default defineConfig(({ mode }) => {
           start_url: base,
           scope: base,
           lang: 'de',
+          // Macht die App zum Ziel im Teilen-Menü von Android: Wer eine
+          // geteilte Vorlage bekommt, wählt „Packliste" und landet direkt in
+          // der Import-Vorschau. GET reicht für Text und kommt ohne eigenen
+          // Service Worker aus (Dateien bräuchten POST).
+          share_target: {
+            action: `${base}import`,
+            method: 'GET',
+            params: {
+              title: 'title',
+              text: 'text',
+              url: 'url'
+            }
+          },
           icons: [
             {
               src: 'icons/icon-192.png',

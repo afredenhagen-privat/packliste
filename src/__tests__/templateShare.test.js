@@ -277,3 +277,28 @@ describe('buildShareCandidates', () => {
     expect(await files[1].text()).toBe(json);
   });
 });
+
+describe('extractTemplateJson', () => {
+  const json = '{"type":"packliste-template","version":1}';
+
+  it('nimmt puren JSON-Text unveraendert', async () => {
+    const { extractTemplateJson } = await import('../db/templateShare.js');
+    expect(extractTemplateJson(json)).toBe(json);
+  });
+
+  it('schneidet aus einer WhatsApp-Nachricht mit Zitat und Absender heraus', async () => {
+    const { extractTemplateJson } = await import('../db/templateShare.js');
+    const nachricht = `Adrian: "Geschäftsreise"\n${json}\n– gesendet via Packliste`;
+    expect(extractTemplateJson(nachricht)).toBe(json);
+  });
+
+  it('wirft bei Text ohne Vorlage', async () => {
+    const { extractTemplateJson } = await import('../db/templateShare.js');
+    expect(() => extractTemplateJson('nur ein Gruss')).toThrow(/keine Vorlage/);
+  });
+
+  it('wirft bei leerem Text', async () => {
+    const { extractTemplateJson } = await import('../db/templateShare.js');
+    expect(() => extractTemplateJson('   ')).toThrow(/Kein Text/);
+  });
+});

@@ -48,6 +48,25 @@ export async function buildTemplateExport(templateId) {
 }
 
 /**
+ * Schneidet das Vorlagen-JSON aus einem geteilten Text heraus.
+ *
+ * Nötig, weil Messenger den Text selten pur weitergeben: WhatsApp hängt gern
+ * Zitatzeichen, den Titel oder eine Absenderzeile an. Deshalb wird der Block
+ * vom ersten `{` bis zum letzten `}` genommen, statt den ganzen Text zu parsen.
+ */
+export function extractTemplateJson(raw) {
+  if (typeof raw !== 'string' || !raw.trim()) {
+    throw new Error('Kein Text erhalten.');
+  }
+  const start = raw.indexOf('{');
+  const end = raw.lastIndexOf('}');
+  if (start === -1 || end === -1 || end < start) {
+    throw new Error('In diesem Text steckt keine Vorlage.');
+  }
+  return raw.slice(start, end + 1);
+}
+
+/**
  * Validiert ein eingehendes Payload und liefert eine normalisierte
  * Struktur { templateName, items: [{ name, quantity, category }] }.
  * Wirft nutzerfreundliche Fehler bei Struktur-/Versionsproblemen.
