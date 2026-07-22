@@ -251,6 +251,8 @@ export function buildShareCandidates(json, filename) {
 export async function shareTemplate(payload, filename) {
   const json = JSON.stringify(payload, null, 2);
   const title = payload.template.name;
+  // Warum es schiefging – wird angezeigt, statt verschluckt zu werden.
+  const notes = [];
 
   if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
     const canShare = (data) => {
@@ -263,12 +265,17 @@ export async function shareTemplate(payload, filename) {
     };
 
     for (const file of buildShareCandidates(json, filename)) {
-      if (!canShare({ files: [file] })) continue;
+      const kind = file.type;
+      if (!canShare({ files: [file] })) {
+        notes.push(`${kind}: abgelehnt (canShare)`);
+        continue;
+      }
       try {
         await navigator.share({ files: [file], title });
-        return 'shared-file';
+        return { status: 'shared-file' };
       } catch (e) {
-        if (e && e.name === 'AbortError') return 'cancelled';
+        if (e && e.name === 'AbortError') return { status: 'cancelled' };
+        notes.push(`${kind}: ${e?.name ?? 'Fehler'} – ${e?.message ?? ''}`);
         break; // Datei-Weg scheitert – auf Text ausweichen
       }
     }
@@ -276,13 +283,15 @@ export async function shareTemplate(payload, filename) {
     // Text-Weg: keine Allowlist, funktioniert wo Web Share erlaubt ist.
     try {
       await navigator.share({ title, text: json });
-      return 'shared-text';
+      return { status: 'shared-text' };
     } catch (e) {
-      if (e && e.name === 'AbortError') return 'cancelled';
-      // sonst: herunterladen
+      if (e && e.name === 'AbortError') return { status: 'cancelled' };
+      notes.push(`text: ${e?.name ?? 'Fehler'} – ${e?.message ?? ''}`);
     }
+  } else {
+    notes.push('navigator.share fehlt');
   }
 
   downloadJson(json, filename);
-  return 'downloaded';
+  return { status: 'downloaded', reason: notes.join(' · ') };
 }
