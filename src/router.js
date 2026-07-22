@@ -32,6 +32,14 @@ const routes = [
     path: '/settings',
     name: 'settings',
     component: () => import('./views/SettingsView.vue')
+  },
+  {
+    // Ziel des Share-Targets aus dem Manifest. Android ruft diese Route mit
+    // dem geteilten Text als Query auf; die Einstellungen übernehmen ihn und
+    // öffnen die Import-Vorschau.
+    path: '/import',
+    name: 'import',
+    redirect: (to) => ({ name: 'settings', query: to.query })
   }
 ];
 

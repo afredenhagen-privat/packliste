@@ -174,7 +174,7 @@ import { useCategoriesStore } from '../stores/categoriesStore.js';
 import { useItemsStore } from '../stores/itemsStore.js';
 import { useTemplatesStore } from '../stores/templatesStore.js';
 import { useTripsStore } from '../stores/tripsStore.js';
-import { useRouter } from 'vue-router';
+import { useRouter, useRoute } from 'vue-router';
 import {
   exportBackup,
   importBackup,
@@ -184,7 +184,8 @@ import TemplateImportSheet from '../components/TemplateImportSheet.vue';
 import {
   parseTemplateImport,
   analyzeImport,
-  formatShareSupport
+  formatShareSupport,
+  extractTemplateJson
 } from '../db/templateShare.js';
 
 const categoriesStore = useCategoriesStore();
@@ -193,6 +194,7 @@ const templatesStore = useTemplatesStore();
 const tripsStore = useTripsStore();
 
 const router = useRouter();
+const route = useRoute();
 
 const importSheetOpen = ref(false);
 const importAnalysis = ref(null);
@@ -235,7 +237,25 @@ watch(newCatOpen, async (v) => {
 onMounted(async () => {
   if (!categoriesStore.loaded) await categoriesStore.load();
   shareSupportText.value = formatShareSupport();
+  await handleSharedTemplate();
 });
+
+/**
+ * Nimmt eine über das Teilen-Menü hereingereichte Vorlage entgegen.
+ *
+ * Android ruft die `/import`-Route des Share-Targets mit dem geteilten Text
+ * als Query auf; der Router leitet hierher weiter. Die Query wird danach
+ * entfernt, damit ein Neuladen nicht erneut importiert.
+ */
+async function handleSharedTemplate() {
+  const geteilt = [route.query.text, route.query.url, route.query.title]
+    .filter((v) => typeof v === 'string' && v.trim())
+    .join('\n');
+  if (!geteilt) return;
+
+  await router.replace({ name: 'settings', query: {} });
+  await openImportPreview(geteilt);
+}
 
 async function renameCategory(c) {
   const trimmed = c.name.trim();
@@ -323,7 +343,7 @@ async function onImport(event) {
 async function openImportPreview(rawText) {
   templateStatus.value = '';
   try {
-    const payload = JSON.parse(rawText);
+    const payload = JSON.parse(extractTemplateJson(rawText));
     const parsed = parseTemplateImport(payload);
 
     // Stores sicherstellen (Settings lädt sonst nur categoriesStore)
