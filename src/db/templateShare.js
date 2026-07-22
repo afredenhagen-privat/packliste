@@ -233,65 +233,92 @@ export function buildShareCandidates(json, filename) {
 /**
  * Teilt ein Export-Payload über das native Teilen-Menü.
  *
- * Kaskade, weil Browser unterschiedlich viel zulassen:
- *   1. Datei (.json, dann .txt) – schönster Weg, der Empfänger bekommt eine
- *      Datei, die er direkt importieren kann. Chrome beschränkt Datei-Teilen
- *      allerdings auf eine Allowlist von Endungen.
- *   2. Reiner Text – unterliegt KEINER Dateityp-Beschränkung. Wo Web Share
- *      überhaupt existiert, funktioniert dieser Weg. Der Empfänger fügt den
- *      Text beim Import ein.
- *   3. Download – letzter Ausweg (Desktop ohne Web Share).
+ * ENTSCHEIDEND: Pro Nutzer-Geste ist nur EIN `navigator.share()`-Aufruf
+ * möglich. Der erste Aufruf verbraucht die Geste; jeder weitere scheitert
+ * zwangsläufig mit „Must be handling a user gesture". Es wird deshalb niemals
+ * nacheinander probiert.
  *
- * WICHTIG: `navigator.share()` verlangt eine noch gültige Nutzer-Geste. Deshalb
- * muss `payload` beim Aufruf bereits fertig vorliegen – nicht erst im Klick-
- * Handler asynchron geladen werden.
+ * Stattdessen wird gemerkt, wenn Datei-Teilen auf diesem Gerät scheitert:
+ * Manche Geräte melden `Permission denied`, obwohl `canShare` true liefert.
+ * Ab dann geht es direkt den Text-Weg, der keiner Dateityp-Beschränkung
+ * unterliegt. Kostet einmalig einen Fehlversuch, danach klappt es.
  *
- * Liefert 'shared-file' | 'shared-text' | 'cancelled' | 'downloaded'.
+ * `payload` muss fertig vorliegen – nicht erst im Klick-Handler laden, sonst
+ * verfällt die Geste.
+ *
+ * Liefert { status, reason? } mit status:
+ *   'shared-file' | 'shared-text' | 'cancelled' | 'file-failed' | 'downloaded'
  */
+const FILE_SHARE_BLOCKED_KEY = 'packliste:datei-teilen-blockiert';
+
+function fileShareBlocked() {
+  try {
+    return localStorage.getItem(FILE_SHARE_BLOCKED_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function rememberFileShareBlocked() {
+  try {
+    localStorage.setItem(FILE_SHARE_BLOCKED_KEY, '1');
+  } catch {
+    /* ohne localStorage merken wir es uns eben nicht */
+  }
+}
+
+/** Ersten Kandidaten liefern, den der Browser laut canShare akzeptiert. */
+function pickShareableFile(json, filename) {
+  if (typeof navigator.canShare !== 'function') return null;
+  for (const file of buildShareCandidates(json, filename)) {
+    try {
+      if (navigator.canShare({ files: [file] })) return file;
+    } catch {
+      /* nächster Kandidat */
+    }
+  }
+  return null;
+}
+
 export async function shareTemplate(payload, filename) {
   const json = JSON.stringify(payload, null, 2);
   const title = payload.template.name;
-  // Warum es schiefging – wird angezeigt, statt verschluckt zu werden.
-  const notes = [];
 
-  if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
-    const canShare = (data) => {
-      if (typeof navigator.canShare !== 'function') return false;
-      try {
-        return navigator.canShare(data);
-      } catch {
-        return false;
-      }
-    };
+  if (typeof navigator === 'undefined' || typeof navigator.share !== 'function') {
+    downloadJson(json, filename);
+    return { status: 'downloaded', reason: 'navigator.share fehlt' };
+  }
 
-    for (const file of buildShareCandidates(json, filename)) {
-      const kind = file.type;
-      if (!canShare({ files: [file] })) {
-        notes.push(`${kind}: abgelehnt (canShare)`);
-        continue;
-      }
+  // Weg A: Datei – nur solange dieses Gerät sie nicht schon abgelehnt hat.
+  if (!fileShareBlocked()) {
+    const file = pickShareableFile(json, filename);
+    if (file) {
       try {
         await navigator.share({ files: [file], title });
         return { status: 'shared-file' };
       } catch (e) {
         if (e && e.name === 'AbortError') return { status: 'cancelled' };
-        notes.push(`${kind}: ${e?.name ?? 'Fehler'} – ${e?.message ?? ''}`);
-        break; // Datei-Weg scheitert – auf Text ausweichen
+        // Die Geste ist jetzt verbraucht – NICHT nachfassen, sondern merken.
+        rememberFileShareBlocked();
+        return {
+          status: 'file-failed',
+          reason: `${e?.name ?? 'Fehler'} – ${e?.message ?? ''}`
+        };
       }
     }
-
-    // Text-Weg: keine Allowlist, funktioniert wo Web Share erlaubt ist.
-    try {
-      await navigator.share({ title, text: json });
-      return { status: 'shared-text' };
-    } catch (e) {
-      if (e && e.name === 'AbortError') return { status: 'cancelled' };
-      notes.push(`text: ${e?.name ?? 'Fehler'} – ${e?.message ?? ''}`);
-    }
-  } else {
-    notes.push('navigator.share fehlt');
+    rememberFileShareBlocked();
   }
 
-  downloadJson(json, filename);
-  return { status: 'downloaded', reason: notes.join(' · ') };
+  // Weg B: Text – der einzige share()-Aufruf in diesem Gestenfenster.
+  try {
+    await navigator.share({ title, text: json });
+    return { status: 'shared-text' };
+  } catch (e) {
+    if (e && e.name === 'AbortError') return { status: 'cancelled' };
+    downloadJson(json, filename);
+    return {
+      status: 'downloaded',
+      reason: `text: ${e?.name ?? 'Fehler'} – ${e?.message ?? ''}`
+    };
+  }
 }
