@@ -193,6 +193,11 @@ async function onShare() {
       setShareStatus(
         'Vorlage als Text geteilt – der Empfänger fügt sie unter Einstellungen › Vorlagen ein.'
       );
+    } else if (result.status === 'file-failed') {
+      // Die Geste ist verbraucht – der Nutzer muss einmal erneut tippen.
+      setShareStatus(
+        'Dateien kann dieses Gerät nicht teilen. Tippe noch einmal auf „Teilen“ – ab jetzt wird als Text geteilt.'
+      );
     } else if (result.status === 'downloaded') {
       // Grund mit anzeigen – ein stiller Fallback macht die Fehlersuche unmöglich.
       setShareStatus(
